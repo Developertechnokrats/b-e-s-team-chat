@@ -1,19 +1,12 @@
 {
-  "name": "best-team-chat",
-  "version": "1.0.0",
-  "description": "B-E-S-Team AI Chat Widget powered by Claude + GHL MCP",
+  "name": "best-team-v2",
+  "version": "2.0.0",
   "type": "module",
   "scripts": {
-    "dev": "netlify dev",
-    "build": "vite build",
-    "preview": "vite preview"
+    "dev": "netlify dev"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.27.0",
-    "@supabase/supabase-js": "^2.45.0",
-    "uuid": "^10.0.0"
-  },
-  "devDependencies": {
-    "vite": "^5.4.0"
+    "@supabase/supabase-js": "^2.45.0"
   }
 }

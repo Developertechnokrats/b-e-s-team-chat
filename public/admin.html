@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>B-E-S-Team Admin Panel</title>
+  <link rel="icon" type="image/webp" href="/logo.webp"/>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{--blue:#1B3A8C;--blue-dark:#122868;--blue-light:#EEF2FF;--red:#C8102E;--green:#2E7D32;--green-light:#F0FDF4;--surface:#F4F6FB;--border:#DDE2EF;--text:#1A1A2E;--muted:#6B7280;--white:#fff}
+    body{font-family:'Source Sans 3',sans-serif;background:var(--surface);color:var(--text);min-height:100vh}
+
+    /* Nav */
+    .topnav{background:var(--blue);padding:0 24px;display:flex;align-items:center;gap:16px;height:56px;border-bottom:3px solid var(--red);position:sticky;top:0;z-index:100}
+    .topnav img{height:34px;filter:brightness(0) invert(1)}
+    .nav-title{font-family:'Oswald',sans-serif;color:#fff;font-size:1.1rem;font-weight:600}
+    .nav-badge{background:var(--red);color:#fff;font-size:0.68rem;padding:2px 7px;border-radius:10px;font-weight:700}
+    .nav-right{margin-left:auto;display:flex;gap:10px;align-items:center}
+    .nav-agent{color:rgba(255,255,255,0.8);font-size:0.83rem}
+    .nav-btn{padding:6px 14px;border:1px solid rgba(255,255,255,0.3);background:transparent;color:#fff;border-radius:7px;font-family:inherit;font-size:0.8rem;cursor:pointer;transition:all .2s}
+    .nav-btn:hover{background:rgba(255,255,255,0.15)}
+    .nav-link{color:rgba(255,255,255,0.7);text-decoration:none;font-size:0.83rem;padding:6px 10px;border-radius:7px;transition:all .2s}
+    .nav-link:hover{color:#fff;background:rgba(255,255,255,0.1)}
+
+    /* Tabs */
+    .tabs{background:var(--white);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:0}
+    .tab-btn{padding:14px 20px;border:none;border-bottom:3px solid transparent;background:transparent;font-family:inherit;font-size:0.88rem;font-weight:500;color:var(--muted);cursor:pointer;transition:all .2s;margin-bottom:-1px}
+    .tab-btn.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+    .tab-btn:hover{color:var(--text)}
+
+    /* Content */
+    .content{max-width:1100px;margin:0 auto;padding:24px}
+    .tab-panel{display:none}.tab-panel.active{display:block}
+
+    /* Stats */
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}
+    .stat{background:var(--white);border-radius:12px;padding:18px;border:1px solid var(--border);text-align:center}
+    .stat-num{font-family:'Oswald',sans-serif;font-size:2rem;font-weight:700;color:var(--blue)}
+    .stat-label{font-size:0.78rem;color:var(--muted);margin-top:2px}
+
+    /* Section */
+    .section{background:var(--white);border-radius:14px;border:1px solid var(--border);overflow:hidden;margin-bottom:20px}
+    .section-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .section-title{font-family:'Oswald',sans-serif;font-size:1rem;color:var(--blue);font-weight:600}
+
+    /* Table */
+    table{width:100%;border-collapse:collapse}
+    th{padding:10px 16px;text-align:left;font-size:0.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;background:var(--surface);border-bottom:1px solid var(--border)}
+    td{padding:11px 16px;font-size:0.88rem;border-bottom:1px solid var(--border)}
+    tr:last-child td{border-bottom:none}
+    tr:hover td{background:var(--surface)}
+
+    .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:10px;font-size:0.75rem;font-weight:600}
+    .badge.active{background:var(--green-light);color:var(--green)}
+    .badge.inactive{background:#FEF2F2;color:#991B1B}
+    .badge.admin{background:var(--blue-light);color:var(--blue)}
+    .badge.agent{background:#F3F4F6;color:#374151}
+
+    .tag{display:inline-flex;align-items:center;padding:2px 8px;border-radius:6px;font-size:0.72rem;background:var(--blue-light);color:var(--blue);margin:1px}
+
+    /* Buttons */
+    .btn{padding:7px 14px;border-radius:8px;border:none;font-family:inherit;font-size:0.83rem;font-weight:600;cursor:pointer;transition:all .2s}
+    .btn-primary{background:var(--blue);color:#fff}.btn-primary:hover{background:var(--blue-dark)}
+    .btn-danger{background:#FEF2F2;color:var(--red);border:1px solid #FECACA}.btn-danger:hover{background:var(--red);color:#fff}
+    .btn-sm{padding:4px 10px;font-size:0.78rem}
+    .btn-ghost{background:transparent;border:1.5px solid var(--border);color:var(--text)}.btn-ghost:hover{border-color:var(--blue);color:var(--blue)}
+
+    /* Modal */
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;display:none;align-items:center;justify-content:center;padding:20px}
+    .modal-overlay.open{display:flex}
+    .modal{background:var(--white);border-radius:16px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+    .modal-header{padding:18px 22px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .modal-title{font-family:'Oswald',sans-serif;font-size:1.1rem;color:var(--blue);font-weight:600}
+    .modal-close{width:28px;height:28px;border:none;background:var(--surface);border-radius:7px;cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;color:var(--muted)}
+    .modal-body{padding:20px 22px}
+    .modal-footer{padding:14px 22px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+
+    .form-group{margin-bottom:14px}
+    .form-group label{display:block;font-size:0.82rem;font-weight:600;color:var(--text);margin-bottom:5px}
+    .form-group input,.form-group select{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-family:inherit;font-size:0.88rem;outline:none;transition:border .2s;background:var(--surface)}
+    .form-group input:focus,.form-group select:focus{border-color:var(--blue);background:#fff}
+    .form-hint{font-size:0.75rem;color:var(--muted);margin-top:3px}
+
+    .checkbox-list{display:flex;flex-direction:column;gap:6px;max-height:180px;overflow-y:auto;border:1.5px solid var(--border);border-radius:8px;padding:8px}
+    .checkbox-item{display:flex;align-items:center;gap:8px;padding:5px 6px;border-radius:6px;cursor:pointer}
+    .checkbox-item:hover{background:var(--surface)}
+    .checkbox-item input{width:15px;height:15px;cursor:pointer;accent-color:var(--blue)}
+    .checkbox-item label{font-size:0.85rem;cursor:pointer;flex:1}
+
+    .alert{padding:10px 13px;border-radius:8px;font-size:0.85rem;margin-bottom:12px;display:none}
+    .alert-error{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B}
+    .alert-success{background:#DCFCE7;border:1px solid #86EFAC;color:#166534}
+
+    @media(max-width:768px){.stats{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:480px){.stats{grid-template-columns:1fr}.content{padding:16px}.tab-btn{padding:12px 14px;font-size:0.82rem}}
+  </style>
+</head>
+<body>
+
+<nav class="topnav">
+  <img src="/logo.webp" alt="B-E-S-Team"/>
+  <span class="nav-title">Admin Panel</span>
+  <span class="nav-badge">ADMIN</span>
+  <div class="nav-right">
+    <span class="nav-agent" id="navAgent"></span>
+    <a href="/chat.html" class="nav-link">← Chat</a>
+    <button class="nav-btn" onclick="logout()">Sign Out</button>
+  </div>
+</nav>
+
+<div class="tabs">
+  <button class="tab-btn active" onclick="showTab('dashboard')">Dashboard</button>
+  <button class="tab-btn" onclick="showTab('sub-accounts')">Sub-Accounts</button>
+  <button class="tab-btn" onclick="showTab('agents')">Agents</button>
+</div>
+
+<div class="content">
+
+  <!-- DASHBOARD -->
+  <div class="tab-panel active" id="tab-dashboard">
+    <div class="stats" id="statsGrid">
+      <div class="stat"><div class="stat-num" id="stat-agents">–</div><div class="stat-label">Agents</div></div>
+      <div class="stat"><div class="stat-num" id="stat-sub">–</div><div class="stat-label">Sub-Accounts</div></div>
+      <div class="stat"><div class="stat-num" id="stat-sessions">–</div><div class="stat-label">Total Sessions</div></div>
+      <div class="stat"><div class="stat-num" id="stat-messages">–</div><div class="stat-label">Total Messages</div></div>
+    </div>
+    <div class="section">
+      <div class="section-header"><span class="section-title">Quick Actions</span></div>
+      <div style="padding:18px;display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="showTab('sub-accounts');openSubModal()">＋ Add Sub-Account</button>
+        <button class="btn btn-ghost" onclick="showTab('agents');openAgentModal()">＋ Create Agent</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SUB-ACCOUNTS -->
+  <div class="tab-panel" id="tab-sub-accounts">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">GHL Sub-Accounts</span>
+        <button class="btn btn-primary btn-sm" onclick="openSubModal()">＋ Add Sub-Account</button>
+      </div>
+      <table id="subTable">
+        <thead><tr><th>Name</th><th>Location ID</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="subTbody"><tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- AGENTS -->
+  <div class="tab-panel" id="tab-agents">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Agents</span>
+        <button class="btn btn-primary btn-sm" onclick="openAgentModal()">＋ Create Agent</button>
+      </div>
+      <table id="agentTable">
+        <thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Assigned Accounts</th><th>Status</th><th>Actions</th></tr></thead>
+        <tbody id="agentTbody"><tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">Loading…</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- SUB-ACCOUNT MODAL -->
+<div class="modal-overlay" id="subModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="subModalTitle">Add Sub-Account</span>
+      <button class="modal-close" onclick="closeModal('subModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-error" id="subError"></div>
+      <div class="alert alert-success" id="subSuccess"></div>
+      <input type="hidden" id="subId"/>
+      <div class="form-group"><label>Account Name *</label><input type="text" id="subName" placeholder="e.g. Acme Corp – Main"/></div>
+      <div class="form-group"><label>GHL Location ID *</label><input type="text" id="subLocationId" placeholder="e.g. ZgiU6Echl1RVM5JsesdN"/><p class="form-hint">Found in GHL → Settings → Business Profile</p></div>
+      <div class="form-group"><label>GHL Private API Token *</label><input type="password" id="subToken" placeholder="pit-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"/><p class="form-hint">GHL → Settings → Private Integrations → Create Key</p></div>
+      <div class="form-group" id="subStatusGroup" style="display:none">
+        <label>Status</label>
+        <select id="subStatus"><option value="true">Active</option><option value="false">Inactive</option></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('subModal')">Cancel</button>
+      <button class="btn btn-primary" id="subSaveBtn" onclick="saveSub()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- AGENT MODAL -->
+<div class="modal-overlay" id="agentModal">
+  <div class="modal">
+    <div class="modal-header">
+      <span class="modal-title" id="agentModalTitle">Create Agent</span>
+      <button class="modal-close" onclick="closeModal('agentModal')">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="alert alert-error" id="agentError"></div>
+      <div class="alert alert-success" id="agentSuccess"></div>
+      <input type="hidden" id="agentId"/>
+      <div class="form-group"><label>Full Name *</label><input type="text" id="agentName" placeholder="Jane Smith"/></div>
+      <div class="form-group" id="agentEmailGroup"><label>Email *</label><input type="email" id="agentEmail" placeholder="jane@company.com"/></div>
+      <div class="form-group" id="agentPwGroup">
+        <label>Password <span style="color:var(--muted);font-weight:400">(leave blank to send magic link)</span></label>
+        <input type="password" id="agentPassword" placeholder="Leave blank for magic link login"/>
+      </div>
+      <div class="form-group"><label>Role</label>
+        <select id="agentRole"><option value="agent">Agent</option><option value="admin">Admin</option></select>
+      </div>
+      <div class="form-group"><label>Assign Sub-Accounts</label>
+        <div class="checkbox-list" id="subCheckboxes"><p style="color:var(--muted);font-size:.82rem;padding:4px">No sub-accounts yet. Add some first.</p></div>
+      </div>
+      <div class="form-group" id="agentStatusGroup" style="display:none">
+        <label>Status</label>
+        <select id="agentStatus"><option value="true">Active</option><option value="false">Inactive</option></select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeModal('agentModal')">Cancel</button>
+      <button class="btn btn-primary" id="agentSaveBtn" onclick="saveAgent()">Create Agent</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let token = null, adminAgent = null;
+let subAccounts = [], agents = [];
+let editingSubId = null, editingAgentId = null;
+
+const $ = id => document.getElementById(id);
+
+async function init() {
+  token = localStorage.getItem('best_token');
+  if (!token) return window.location.href = '/';
+  const res = await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ action:'me', token }) });
+  if (!res.ok) { localStorage.clear(); return window.location.href = '/'; }
+  const d = await res.json();
+  adminAgent = d.agent;
+  if (adminAgent.role !== 'admin') return window.location.href = '/chat.html';
+  $('navAgent').textContent = adminAgent.full_name;
+  loadAll();
+}
+
+async function loadAll() {
+  await Promise.all([ loadStats(), loadSubAccounts(), loadAgents() ]);
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type':'application/json', Authorization:`Bearer ${token}` } };
+  if (body) opts.body = JSON.stringify(body);
+  const res = await fetch('/api/admin' + path, opts);
+  return res.json();
+}
+
+async function loadStats() {
+  const d = await api('GET', '/stats');
+  $('stat-agents').textContent = d.agents ?? '–';
+  $('stat-sub').textContent = d.sub_accounts ?? '–';
+  $('stat-sessions').textContent = d.sessions ?? '–';
+  $('stat-messages').textContent = d.messages ?? '–';
+}
+
+async function loadSubAccounts() {
+  const d = await api('GET', '/sub-accounts');
+  subAccounts = d.sub_accounts || [];
+  const tbody = $('subTbody');
+  if (!subAccounts.length) { tbody.innerHTML='<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:24px">No sub-accounts yet. Add one!</td></tr>'; return; }
+  tbody.innerHTML = subAccounts.map(s => `
+    <tr>
+      <td><strong>${esc(s.name)}</strong></td>
+      <td><code style="font-size:.8rem;background:var(--surface);padding:2px 6px;border-radius:4px">${esc(s.location_id)}</code></td>
+      <td><span class="badge ${s.is_active?'active':'inactive'}">${s.is_active?'Active':'Inactive'}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="editSub('${s.id}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteSub('${s.id}','${esc(s.name)}')">Delete</button>
+      </td>
+    </tr>`).join('');
+}
+
+async function loadAgents() {
+  const d = await api('GET', '/agents');
+  agents = d.agents || [];
+  const tbody = $('agentTbody');
+  if (!agents.length) { tbody.innerHTML='<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">No agents yet.</td></tr>'; return; }
+  tbody.innerHTML = agents.map(a => {
+    const sas = (a.agent_sub_accounts||[]).map(x=>x.sub_accounts?.name).filter(Boolean);
+    return `<tr>
+      <td><strong>${esc(a.full_name)}</strong></td>
+      <td>${esc(a.email)}</td>
+      <td><span class="badge ${a.role}">${a.role}</span></td>
+      <td>${sas.map(s=>`<span class="tag">${esc(s)}</span>`).join('')||'<span style="color:var(--muted);font-size:.8rem">None</span>'}</td>
+      <td><span class="badge ${a.is_active?'active':'inactive'}">${a.is_active?'Active':'Disabled'}</span></td>
+      <td>
+        <button class="btn btn-ghost btn-sm" onclick="editAgent('${a.id}')">Edit</button>
+        <button class="btn btn-danger btn-sm" onclick="deleteAgent('${a.id}','${esc(a.full_name)}')">Delete</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Sub-account modal ──
+function openSubModal() { editingSubId=null; resetSubModal(); $('subModal').classList.add('open'); }
+function resetSubModal() {
+  $('subModalTitle').textContent='Add Sub-Account'; $('subSaveBtn').textContent='Save';
+  $('subId').value=''; $('subName').value=''; $('subLocationId').value=''; $('subToken').value='';
+  $('subStatusGroup').style.display='none';
+  $('subError').style.display=$('subSuccess').style.display='none';
+}
+function editSub(id) {
+  const s = subAccounts.find(x=>x.id===id); if(!s) return;
+  editingSubId = id;
+  $('subModalTitle').textContent='Edit Sub-Account'; $('subSaveBtn').textContent='Save Changes';
+  $('subId').value=s.id; $('subName').value=s.name; $('subLocationId').value=s.location_id;
+  $('subToken').value=''; // don't show token
+  $('subStatusGroup').style.display='block'; $('subStatus').value=String(s.is_active);
+  $('subError').style.display=$('subSuccess').style.display='none';
+  $('subModal').classList.add('open');
+}
+async function saveSub() {
+  const name=$('subName').value.trim(), location_id=$('subLocationId').value.trim(), api_token=$('subToken').value.trim();
+  if (!editingSubId && (!name||!location_id||!api_token)) return showAlert('subError','All fields are required.');
+  if (editingSubId && !name) return showAlert('subError','Name is required.');
+  $('subSaveBtn').disabled=true; $('subSaveBtn').textContent='Saving…';
+  try {
+    let res;
+    if (editingSubId) {
+      const body={name,location_id,is_active:$('subStatus').value==='true'};
+      if(api_token) body.api_token=api_token;
+      res = await api('PUT',`/sub-accounts/${editingSubId}`,body);
+    } else {
+      res = await api('POST','/sub-accounts',{name,location_id,api_token});
+    }
+    if (res.error) return showAlert('subError', res.error);
+    showAlert('subSuccess','Saved successfully!');
+    loadAll(); setTimeout(()=>closeModal('subModal'),1000);
+  } finally { $('subSaveBtn').disabled=false; $('subSaveBtn').textContent='Save'; }
+}
+async function deleteSub(id,name) {
+  if(!confirm(`Delete sub-account "${name}"? This cannot be undone.`)) return;
+  await api('DELETE',`/sub-accounts/${id}`);
+  loadAll();
+}
+
+// ── Agent modal ──
+function openAgentModal() { editingAgentId=null; resetAgentModal(); $('agentModal').classList.add('open'); }
+function resetAgentModal() {
+  $('agentModalTitle').textContent='Create Agent'; $('agentSaveBtn').textContent='Create Agent';
+  $('agentId').value=''; $('agentName').value=''; $('agentEmail').value=''; $('agentPassword').value='';
+  $('agentRole').value='agent'; $('agentStatusGroup').style.display='none';
+  $('agentEmailGroup').style.display='block'; $('agentPwGroup').style.display='block';
+  $('agentError').style.display=$('agentSuccess').style.display='none';
+  buildSubCheckboxes([]);
+}
+function buildSubCheckboxes(selected=[]) {
+  const container = $('subCheckboxes');
+  if (!subAccounts.length) { container.innerHTML='<p style="color:var(--muted);font-size:.82rem;padding:4px">No sub-accounts yet.</p>'; return; }
+  container.innerHTML = subAccounts.map(s=>`
+    <label class="checkbox-item">
+      <input type="checkbox" value="${s.id}" ${selected.includes(s.id)?'checked':''}/>
+      <label>${esc(s.name)}</label>
+    </label>`).join('');
+}
+function editAgent(id) {
+  const a = agents.find(x=>x.id===id); if(!a) return;
+  editingAgentId = id;
+  $('agentModalTitle').textContent='Edit Agent'; $('agentSaveBtn').textContent='Save Changes';
+  $('agentId').value=a.id; $('agentName').value=a.full_name;
+  $('agentEmailGroup').style.display='none'; $('agentPwGroup').style.display='none';
+  $('agentRole').value=a.role; $('agentStatusGroup').style.display='block';
+  $('agentStatus').value=String(a.is_active);
+  $('agentError').style.display=$('agentSuccess').style.display='none';
+  const selectedIds = (a.agent_sub_accounts||[]).map(x=>x.sub_account_id);
+  buildSubCheckboxes(selectedIds);
+  $('agentModal').classList.add('open');
+}
+async function saveAgent() {
+  const full_name=$('agentName').value.trim();
+  if(!full_name) return showAlert('agentError','Full name is required.');
+  const selectedSubs = [...document.querySelectorAll('#subCheckboxes input:checked')].map(cb=>cb.value);
+  $('agentSaveBtn').disabled=true; $('agentSaveBtn').textContent='Saving…';
+  try {
+    let res;
+    if (editingAgentId) {
+      res = await api('PUT',`/agents/${editingAgentId}`,{
+        full_name, role:$('agentRole').value,
+        is_active:$('agentStatus').value==='true', sub_account_ids:selectedSubs
+      });
+    } else {
+      const email=$('agentEmail').value.trim(), password=$('agentPassword').value;
+      if(!email) return showAlert('agentError','Email is required.');
+      res = await api('POST','/agents',{ full_name, email, password:password||undefined, role:$('agentRole').value, sub_account_ids:selectedSubs });
+    }
+    if (res.error) return showAlert('agentError', res.error);
+    showAlert('agentSuccess', editingAgentId ? 'Agent updated!' : 'Agent created! They will receive a login email.');
+    loadAll(); setTimeout(()=>closeModal('agentModal'),1200);
+  } finally { $('agentSaveBtn').disabled=false; $('agentSaveBtn').textContent = editingAgentId?'Save Changes':'Create Agent'; }
+}
+async function deleteAgent(id,name) {
+  if(!confirm(`Delete agent "${name}"? All their chat history will be removed.`)) return;
+  await api('DELETE',`/agents/${id}`);
+  loadAll();
+}
+
+// ── Helpers ──
+function showTab(name) {
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  $(`tab-${name}`).classList.add('active');
+  [...document.querySelectorAll('.tab-btn')].find(b=>b.textContent.toLowerCase().includes(name==='sub-accounts'?'sub':name))?.classList.add('active');
+  if(name==='sub-accounts') loadSubAccounts();
+  if(name==='agents') loadAgents();
+}
+function closeModal(id) { $(id).classList.remove('open'); }
+function showAlert(id,msg) { const el=$(id); el.textContent=msg; el.style.display='block'; }
+function esc(t='') { return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function logout() { localStorage.clear(); window.location.href='/'; }
+
+// Close modal on overlay click
+document.querySelectorAll('.modal-overlay').forEach(o=>o.addEventListener('click',e=>{ if(e.target===o) o.classList.remove('open'); }));
+
+init();
+</script>
+</body>
+</html>

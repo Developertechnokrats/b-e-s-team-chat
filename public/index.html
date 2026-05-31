@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>B-E-S-Team — Login</title>
+  <link rel="icon" type="image/webp" href="/logo.webp"/>
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Source+Sans+3:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    :root{--blue:#1B3A8C;--blue-dark:#122868;--red:#C8102E;--green:#2E7D32;--dark:#0F1923;--surface:#F4F6FB;--border:#DDE2EF;--text:#1A1A2E;--muted:#6B7280;--white:#fff}
+    body{font-family:'Source Sans 3',sans-serif;background:var(--surface);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .card{background:var(--white);border-radius:20px;box-shadow:0 8px 48px rgba(27,58,140,0.13);width:100%;max-width:420px;overflow:hidden}
+    .card-header{background:var(--blue);padding:28px 32px;text-align:center;border-bottom:3px solid var(--red)}
+    .card-header img{height:56px;filter:brightness(0) invert(1);margin-bottom:10px}
+    .card-header h1{font-family:'Oswald',sans-serif;color:var(--white);font-size:1.3rem;font-weight:600}
+    .card-header p{color:rgba(255,255,255,0.7);font-size:0.8rem;margin-top:3px}
+    .card-body{padding:28px 32px}
+    .tabs{display:flex;gap:8px;margin-bottom:24px;background:var(--surface);border-radius:10px;padding:4px}
+    .tab{flex:1;padding:8px;border:none;border-radius:8px;background:transparent;font-family:inherit;font-size:0.88rem;font-weight:500;cursor:pointer;color:var(--muted);transition:all .2s}
+    .tab.active{background:var(--white);color:var(--blue);box-shadow:0 2px 8px rgba(27,58,140,0.1)}
+    .form-group{margin-bottom:16px}
+    label{display:block;font-size:0.83rem;font-weight:600;color:var(--text);margin-bottom:5px}
+    input{width:100%;padding:10px 13px;border:1.5px solid var(--border);border-radius:9px;font-family:inherit;font-size:0.9rem;outline:none;transition:border .2s;background:var(--surface);color:var(--text)}
+    input:focus{border-color:var(--blue);background:var(--white)}
+    .btn{width:100%;padding:11px;background:var(--blue);color:var(--white);border:none;border-radius:10px;font-family:'Oswald',sans-serif;font-size:1rem;font-weight:600;letter-spacing:.5px;cursor:pointer;transition:all .2s;margin-top:4px}
+    .btn:hover{background:var(--blue-dark)}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .error{background:#FEE2E2;border:1px solid #FCA5A5;color:#991B1B;padding:10px 13px;border-radius:8px;font-size:0.85rem;margin-bottom:14px;display:none}
+    .success{background:#DCFCE7;border:1px solid #86EFAC;color:#166534;padding:10px 13px;border-radius:8px;font-size:0.85rem;margin-bottom:14px;display:none}
+    .footer{text-align:center;font-size:0.75rem;color:var(--muted);padding:0 0 20px;font-style:italic}
+  </style>
+</head>
+<body>
+<div class="card">
+  <div class="card-header">
+    <img src="/logo.webp" alt="B-E-S-Team"/>
+    <h1>Agent Portal</h1>
+    <p>Sign in to access your CRM assistant</p>
+  </div>
+  <div class="card-body">
+    <div class="tabs">
+      <button class="tab active" onclick="setTab('password')">Password</button>
+      <button class="tab" onclick="setTab('magic')">Magic Link</button>
+    </div>
+    <div id="error" class="error"></div>
+    <div id="success" class="success"></div>
+
+    <!-- Password login -->
+    <div id="tab-password">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="email-pw" placeholder="you@company.com" autocomplete="email"/>
+      </div>
+      <div class="form-group">
+        <label>Password</label>
+        <input type="password" id="password" placeholder="••••••••" autocomplete="current-password"/>
+      </div>
+      <button class="btn" id="btn-login" onclick="loginPassword()">Sign In</button>
+    </div>
+
+    <!-- Magic link -->
+    <div id="tab-magic" style="display:none">
+      <div class="form-group">
+        <label>Email</label>
+        <input type="email" id="email-magic" placeholder="you@company.com"/>
+      </div>
+      <button class="btn" id="btn-magic" onclick="loginMagic()">Send Magic Link</button>
+    </div>
+  </div>
+  <p class="footer">B-E-S-Team · Increase Your Profit By Refining Your Processes</p>
+</div>
+<script>
+  // Redirect if already logged in
+  const stored = localStorage.getItem('best_token');
+  if (stored) window.location.href = '/chat.html';
+
+  function setTab(t) {
+    document.querySelectorAll('.tab').forEach((el,i) => el.classList.toggle('active', (i===0&&t==='password')||(i===1&&t==='magic')));
+    document.getElementById('tab-password').style.display = t==='password'?'':'none';
+    document.getElementById('tab-magic').style.display = t==='magic'?'':'none';
+    hideMsg();
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error');
+    el.textContent = msg; el.style.display = 'block';
+    document.getElementById('success').style.display = 'none';
+  }
+  function showSuccess(msg) {
+    const el = document.getElementById('success');
+    el.textContent = msg; el.style.display = 'block';
+    document.getElementById('error').style.display = 'none';
+  }
+  function hideMsg() {
+    document.getElementById('error').style.display = 'none';
+    document.getElementById('success').style.display = 'none';
+  }
+
+  async function loginPassword() {
+    const email = document.getElementById('email-pw').value.trim();
+    const password = document.getElementById('password').value;
+    if (!email || !password) return showError('Please enter email and password.');
+    const btn = document.getElementById('btn-login');
+    btn.disabled = true; btn.textContent = 'Signing in…';
+    try {
+      const res = await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ action:'login', email, password }) });
+      const data = await res.json();
+      if (!res.ok) return showError(data.error || 'Login failed');
+      localStorage.setItem('best_token', data.accessToken);
+      localStorage.setItem('best_agent', JSON.stringify(data.agent));
+      window.location.href = data.agent.role === 'admin' ? '/admin.html' : '/chat.html';
+    } catch(e) { showError('Network error. Please try again.'); }
+    finally { btn.disabled=false; btn.textContent='Sign In'; }
+  }
+
+  async function loginMagic() {
+    const email = document.getElementById('email-magic').value.trim();
+    if (!email) return showError('Please enter your email.');
+    const btn = document.getElementById('btn-magic');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    try {
+      const res = await fetch('/api/auth', { method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ action:'magic_link', email }) });
+      const data = await res.json();
+      if (!res.ok) return showError(data.error || 'Failed to send link');
+      showSuccess('Magic link sent! Check your email to sign in.');
+    } catch(e) { showError('Network error. Please try again.'); }
+    finally { btn.disabled=false; btn.textContent='Send Magic Link'; }
+  }
+
+  document.addEventListener('keydown', e => { if(e.key==='Enter') loginPassword(); });
+</script>
+</body>
+</html>

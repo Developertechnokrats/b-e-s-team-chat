@@ -1,18 +1,45 @@
 [build]
-  command = "npm run build"
-  publish = "dist"
+  command = "echo 'Static site, no build'"
+  publish = "public"
   functions = "netlify/functions"
 
 [dev]
-  command = "vite"
   port = 8888
-  targetPort = 5173
 
+# Auth
 [[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/:splat"
+  from = "/api/auth"
+  to = "/.netlify/functions/auth"
   status = 200
 
+# Admin API
+[[redirects]]
+  from = "/api/admin/*"
+  to = "/.netlify/functions/admin"
+  status = 200
+
+# Chat API (all routes)
+[[redirects]]
+  from = "/api/chat/sessions"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
+  from = "/api/chat/session"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
+  from = "/api/chat/history"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
+  from = "/api/chat"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+# SPA fallback
 [[redirects]]
   from = "/*"
   to = "/index.html"
@@ -20,4 +47,3 @@
 
 [functions]
   node_bundler = "esbuild"
-  included_files = ["netlify/functions/**"]
