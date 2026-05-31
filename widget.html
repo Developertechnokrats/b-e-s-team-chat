@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+  <title>B-E-S-Team Chat Widget</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', sans-serif; background: transparent; }
+
+    /* Floating bubble */
+    #chat-bubble {
+      position: fixed; bottom: 24px; right: 24px; z-index: 9999;
+      width: 58px; height: 58px; border-radius: 50%;
+      background: #1B3A8C; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 20px rgba(27,58,140,0.4);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    #chat-bubble:hover { transform: scale(1.08); box-shadow: 0 6px 28px rgba(27,58,140,0.5); }
+    #chat-bubble svg { width: 26px; height: 26px; fill: white; }
+    #unread-badge {
+      position: absolute; top: -2px; right: -2px;
+      width: 18px; height: 18px; background: #C8102E; border-radius: 50%;
+      font-size: 10px; color: white; display: flex; align-items: center; justify-content: center;
+      font-weight: 700; display: none;
+    }
+
+    /* Chat iframe container */
+    #chat-container {
+      position: fixed; bottom: 96px; right: 24px; z-index: 9998;
+      width: 380px; height: 560px; border-radius: 18px;
+      box-shadow: 0 8px 48px rgba(0,0,0,0.18);
+      overflow: hidden; display: none;
+      transform: scale(0.9) translateY(20px);
+      opacity: 0;
+      transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+    #chat-container.open {
+      display: block;
+      animation: popIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+    @keyframes popIn {
+      from { transform: scale(0.9) translateY(20px); opacity: 0; }
+      to   { transform: scale(1) translateY(0); opacity: 1; }
+    }
+    #chat-frame { width: 100%; height: 100%; border: none; }
+
+    @media (max-width: 440px) {
+      #chat-container { width: calc(100vw - 16px); right: 8px; bottom: 80px; height: 70vh; }
+    }
+  </style>
+</head>
+<body>
+<div id="chat-bubble" onclick="toggleChat()" title="Chat with B-E-S-Team AI">
+  <svg viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 12H6v-2h12v2zm0-3H6V9h12v2zm0-3H6V6h12v2z"/></svg>
+  <span id="unread-badge">1</span>
+</div>
+<div id="chat-container">
+  <iframe id="chat-frame" src="" title="B-E-S-Team AI Chat" allow="microphone"></iframe>
+</div>
+
+<script>
+  let isOpen = false;
+  let hasOpened = false;
+
+  function toggleChat() {
+    isOpen = !isOpen;
+    const container = document.getElementById('chat-container');
+    const badge = document.getElementById('unread-badge');
+    const frame = document.getElementById('chat-frame');
+
+    if (isOpen) {
+      if (!hasOpened) {
+        // Load iframe only on first open
+        frame.src = window.location.origin + '/';
+        hasOpened = true;
+      }
+      container.style.display = 'block';
+      setTimeout(() => container.classList.add('open'), 10);
+      badge.style.display = 'none';
+    } else {
+      container.classList.remove('open');
+      setTimeout(() => container.style.display = 'none', 250);
+    }
+  }
+
+  // Show badge after 3 seconds to grab attention
+  setTimeout(() => {
+    if (!isOpen && !hasOpened) {
+      document.getElementById('unread-badge').style.display = 'flex';
+    }
+  }, 3000);
+</script>
+</body>
+</html>
