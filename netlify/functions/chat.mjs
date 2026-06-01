@@ -521,6 +521,175 @@ const GHL_TOOLS = [
     name: "ghl_get_trigger_links",
     description: "Get all trigger links in the account.",
     input_schema: { type: "object", properties: {} }
+  },
+
+  // ════════════ CONTACTS — UPSERT ════════════
+  {
+    name: "ghl_upsert_contact",
+    description: "Create a new contact OR update an existing one based on email/phone match. Prevents duplicate contacts. Use this instead of create when you're not sure if the contact already exists.",
+    input_schema: { type: "object", properties: {
+      firstName: { type: "string" },
+      lastName: { type: "string" },
+      email: { type: "string" },
+      phone: { type: "string" },
+      companyName: { type: "string" },
+      address1: { type: "string" },
+      city: { type: "string" },
+      state: { type: "string" },
+      postalCode: { type: "string" },
+      country: { type: "string" },
+      tags: { type: "array", items: { type: "string" } },
+      customFields: { type: "array", items: { type: "object" } },
+      source: { type: "string" }
+    }, required: ["email"] }
+  },
+
+  // ════════════ SOCIAL MEDIA POSTING (FULL) ════════════
+  {
+    name: "ghl_get_social_accounts",
+    description: "Get all connected social media accounts (Facebook, Instagram, LinkedIn, Twitter/X, TikTok, GMB) and their groups.",
+    input_schema: { type: "object", properties: {} }
+  },
+  {
+    name: "ghl_get_social_post",
+    description: "Get details of a specific social media post by post ID.",
+    input_schema: { type: "object", properties: {
+      postId: { type: "string" }
+    }, required: ["postId"] }
+  },
+  {
+    name: "ghl_create_social_post",
+    description: "Create and schedule a new social media post across one or more platforms (Facebook, Instagram, LinkedIn, Twitter/X, TikTok, GMB).",
+    input_schema: { type: "object", properties: {
+      accountIds: { type: "array", items: { type: "string" }, description: "List of social account IDs to post to" },
+      body: { type: "string", description: "Post content/caption text" },
+      scheduleDate: { type: "string", description: "ISO datetime to schedule. Leave empty to post immediately." },
+      mediaUrls: { type: "array", items: { type: "string" }, description: "Optional image/video URLs to attach" },
+      tags: { type: "array", items: { type: "string" }, description: "Optional hashtags" }
+    }, required: ["accountIds", "body"] }
+  },
+  {
+    name: "ghl_edit_social_post",
+    description: "Edit/update an existing social media post — change content, reschedule, or modify media.",
+    input_schema: { type: "object", properties: {
+      postId: { type: "string" },
+      body: { type: "string", description: "Updated post content" },
+      scheduleDate: { type: "string", description: "New scheduled ISO datetime" },
+      mediaUrls: { type: "array", items: { type: "string" } }
+    }, required: ["postId"] }
+  },
+  {
+    name: "ghl_get_social_statistics",
+    description: "Get analytics/statistics for connected social media accounts — likes, reach, impressions, followers.",
+    input_schema: { type: "object", properties: {
+      accountIds: { type: "array", items: { type: "string" }, description: "Social account IDs to get stats for" },
+      startDate: { type: "number", description: "Unix timestamp ms" },
+      endDate: { type: "number", description: "Unix timestamp ms" }
+    }, required: ["accountIds"] }
+  },
+
+  // ════════════ BLOGS (FULL) ════════════
+  {
+    name: "ghl_get_blogs",
+    description: "Get all blog sites set up in the account.",
+    input_schema: { type: "object", properties: {
+      skip: { type: "number" },
+      limit: { type: "number" }
+    }}
+  },
+  {
+    name: "ghl_get_blog_posts",
+    description: "Get blog posts for a specific blog site, with optional filters.",
+    input_schema: { type: "object", properties: {
+      blogId: { type: "string", description: "Blog site ID" },
+      status: { type: "string", enum: ["DRAFT", "PUBLISHED", "SCHEDULED", "ARCHIVED"] },
+      limit: { type: "number" },
+      offset: { type: "number" },
+      searchTerm: { type: "string" }
+    }, required: ["blogId"] }
+  },
+  {
+    name: "ghl_create_blog_post",
+    description: "Create a new blog post. Can save as draft or publish immediately.",
+    input_schema: { type: "object", properties: {
+      blogId: { type: "string", description: "Blog site ID to publish to" },
+      title: { type: "string" },
+      description: { type: "string", description: "Blog post full HTML/text content" },
+      imageUrl: { type: "string", description: "Featured image URL" },
+      status: { type: "string", enum: ["DRAFT", "PUBLISHED", "SCHEDULED"], description: "Publication status" },
+      publishedAt: { type: "string", description: "ISO datetime for scheduled posts" },
+      categories: { type: "array", items: { type: "string" }, description: "Category IDs" },
+      tags: { type: "array", items: { type: "string" } },
+      author: { type: "string", description: "Author ID" },
+      urlSlug: { type: "string", description: "URL slug (must be unique — use check-slug first)" },
+      metaTitle: { type: "string" },
+      metaDescription: { type: "string" }
+    }, required: ["blogId", "title", "description", "urlSlug"] }
+  },
+  {
+    name: "ghl_update_blog_post",
+    description: "Update an existing blog post — edit content, change status, reschedule.",
+    input_schema: { type: "object", properties: {
+      blogId: { type: "string" },
+      postId: { type: "string" },
+      title: { type: "string" },
+      description: { type: "string" },
+      imageUrl: { type: "string" },
+      status: { type: "string", enum: ["DRAFT", "PUBLISHED", "SCHEDULED", "ARCHIVED"] },
+      publishedAt: { type: "string" },
+      categories: { type: "array", items: { type: "string" } },
+      tags: { type: "array", items: { type: "string" } },
+      urlSlug: { type: "string" },
+      metaTitle: { type: "string" },
+      metaDescription: { type: "string" }
+    }, required: ["blogId", "postId"] }
+  },
+  {
+    name: "ghl_check_blog_slug",
+    description: "Check if a URL slug is available before creating a blog post. Returns true if available.",
+    input_schema: { type: "object", properties: {
+      blogId: { type: "string" },
+      urlSlug: { type: "string" }
+    }, required: ["blogId", "urlSlug"] }
+  },
+  {
+    name: "ghl_get_blog_categories",
+    description: "Get all blog categories for the account.",
+    input_schema: { type: "object", properties: {
+      limit: { type: "number" },
+      skip: { type: "number" }
+    }}
+  },
+  {
+    name: "ghl_get_blog_authors",
+    description: "Get all blog authors configured in the account.",
+    input_schema: { type: "object", properties: {
+      limit: { type: "number" },
+      skip: { type: "number" }
+    }}
+  },
+
+  // ════════════ EMAIL TEMPLATES ════════════
+  {
+    name: "ghl_get_email_templates",
+    description: "Get all email templates saved in the account. Useful for referencing templates before sending campaigns.",
+    input_schema: { type: "object", properties: {
+      limit: { type: "number" },
+      skip: { type: "number" },
+      type: { type: "string", description: "Filter by template type: html, builder, blank, custom" },
+      search: { type: "string", description: "Search by template name" }
+    }}
+  },
+  {
+    name: "ghl_create_email_template",
+    description: "Create a new email template in the account.",
+    input_schema: { type: "object", properties: {
+      name: { type: "string", description: "Template name" },
+      type: { type: "string", enum: ["html", "builder", "blank", "custom"], description: "Template type" },
+      subject: { type: "string", description: "Email subject line" },
+      body: { type: "string", description: "HTML email body content" },
+      previewText: { type: "string", description: "Preview/snippet text shown in inbox" }
+    }, required: ["name", "type"] }
   }
 ];
 
@@ -848,6 +1017,128 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
         return await r.json();
       }
 
+      // ── CONTACTS UPSERT ──
+      case "ghl_upsert_contact": {
+        const r = await fetch(`${BASE}/contacts/upsert`, {
+          method: "POST", headers: h,
+          body: JSON.stringify({ ...input, locationId })
+        });
+        return await r.json();
+      }
+
+      // ── SOCIAL MEDIA POSTING (FULL) ──
+      case "ghl_get_social_accounts": {
+        const r = await fetch(`${BASE}/social-media-posting/oauth/${locationId}/accounts`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_get_social_post": {
+        const r = await fetch(`${BASE}/social-media-posting/${locationId}/posts/${input.postId}`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_create_social_post": {
+        const body = {
+          locationId,
+          accountIds: input.accountIds,
+          body: input.body,
+          ...(input.scheduleDate && { scheduleDate: input.scheduleDate }),
+          ...(input.mediaUrls?.length && { mediaUrls: input.mediaUrls }),
+          ...(input.tags?.length && { tags: input.tags })
+        };
+        const r = await fetch(`${BASE}/social-media-posting/${locationId}/posts`, {
+          method: "POST", headers: h, body: JSON.stringify(body)
+        });
+        return await r.json();
+      }
+      case "ghl_edit_social_post": {
+        const { postId, ...body } = input;
+        const r = await fetch(`${BASE}/social-media-posting/${locationId}/posts/${postId}`, {
+          method: "PUT", headers: h, body: JSON.stringify({ ...body, locationId })
+        });
+        return await r.json();
+      }
+      case "ghl_get_social_statistics": {
+        const body = {
+          locationId,
+          accountIds: input.accountIds,
+          ...(input.startDate && { startDate: input.startDate }),
+          ...(input.endDate && { endDate: input.endDate })
+        };
+        const r = await fetch(`${BASE}/social-media-posting/${locationId}/analytics`, {
+          method: "POST", headers: h, body: JSON.stringify(body)
+        });
+        return await r.json();
+      }
+
+      // ── BLOGS (FULL) ──
+      case "ghl_get_blogs": {
+        const p = new URLSearchParams({ locationId });
+        if (input.skip) p.set("skip", String(input.skip));
+        if (input.limit) p.set("limit", String(input.limit || 10));
+        const r = await fetch(`${BASE}/blogs/?${p}`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_get_blog_posts": {
+        const p = new URLSearchParams({ locationId, blogId: input.blogId });
+        if (input.status) p.set("status", input.status);
+        if (input.limit) p.set("limit", String(input.limit || 10));
+        if (input.offset) p.set("offset", String(input.offset));
+        if (input.searchTerm) p.set("searchTerm", input.searchTerm);
+        const r = await fetch(`${BASE}/blogs/posts?${p}`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_create_blog_post": {
+        const r = await fetch(`${BASE}/blogs/posts`, {
+          method: "POST", headers: h,
+          body: JSON.stringify({ ...input, locationId })
+        });
+        return await r.json();
+      }
+      case "ghl_update_blog_post": {
+        const { postId, blogId, ...body } = input;
+        const r = await fetch(`${BASE}/blogs/posts/${postId}`, {
+          method: "PUT", headers: h,
+          body: JSON.stringify({ ...body, locationId, blogId })
+        });
+        return await r.json();
+      }
+      case "ghl_check_blog_slug": {
+        const p = new URLSearchParams({ locationId, blogId: input.blogId, urlSlug: input.urlSlug });
+        const r = await fetch(`${BASE}/blogs/posts/url-slug-exists?${p}`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_get_blog_categories": {
+        const p = new URLSearchParams({ locationId });
+        if (input.limit) p.set("limit", String(input.limit || 10));
+        if (input.skip) p.set("skip", String(input.skip));
+        const r = await fetch(`${BASE}/blogs/categories?${p}`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_get_blog_authors": {
+        const p = new URLSearchParams({ locationId });
+        if (input.limit) p.set("limit", String(input.limit || 10));
+        if (input.skip) p.set("skip", String(input.skip));
+        const r = await fetch(`${BASE}/blogs/authors?${p}`, { headers: h });
+        return await r.json();
+      }
+
+      // ── EMAIL TEMPLATES ──
+      case "ghl_get_email_templates": {
+        const p = new URLSearchParams({ locationId });
+        if (input.limit) p.set("limit", String(input.limit || 10));
+        if (input.skip) p.set("skip", String(input.skip));
+        if (input.type) p.set("type", input.type);
+        if (input.search) p.set("search", input.search);
+        const r = await fetch(`${BASE}/emails/templates?${p}`, { headers: h });
+        return await r.json();
+      }
+      case "ghl_create_email_template": {
+        const r = await fetch(`${BASE}/emails/templates`, {
+          method: "POST", headers: h,
+          body: JSON.stringify({ ...input, locationId })
+        });
+        return await r.json();
+      }
+
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
@@ -913,10 +1204,31 @@ IMPORTANT RULES:
 - Always refer to the CRM as "B-E-S-Team CRM"
 - Always refer to the system as "B-E-S-Team platform"
 - If asked what CRM or software powers this, say it is a proprietary B-E-S-Team platform
-- You have direct access to B-E-S-Team CRM tools to manage contacts, pipelines, appointments, tasks, conversations, messages, workflows, invoices, payments, forms, surveys, campaigns, social posts and more
 - Be concise, action-oriented, and confirm what you've done after each action
-- When reading conversations or messages, summarise them clearly for the agent
-- When the agent asks to "read", "check", "show" conversations — use ghl_search_conversations first, then ghl_get_messages to fetch the actual messages
+
+YOU HAVE FULL ACCESS TO THESE B-E-S-TEAM CRM CAPABILITIES:
+
+CONTACTS: search, get, create, update, delete, upsert (create-or-update), add/remove tags, notes, tasks, appointments
+CONVERSATIONS: search conversations, read full message threads (SMS/Email/WhatsApp/FB/IG), send messages on any channel, create & update conversations
+OPPORTUNITIES: full pipeline management — search, create, update, delete opportunities across all stages
+CALENDARS: list calendars, check free slots, view appointments, create/update/delete appointments
+WORKFLOWS: list workflows, add or remove contacts from automations
+CAMPAIGNS: list all campaigns
+FORMS & SURVEYS: list forms/surveys, get submissions
+USERS: list team members, get user details
+PAYMENTS: list orders, get order details, list transactions
+INVOICES: list, view, send, void invoices
+SOCIAL MEDIA: list connected accounts, get/create/edit posts, get analytics/statistics
+BLOGS: list blog sites, get/create/update blog posts, manage categories and authors, check URL slugs
+EMAIL TEMPLATES: list and create email templates
+LOCATION: get account info, custom fields, tags, trigger links
+
+TOOL USAGE GUIDELINES:
+- For conversations: use ghl_search_conversations first to find the thread, then ghl_get_messages to read messages
+- For new contacts where you are unsure if they exist: use ghl_upsert_contact to avoid duplicates
+- For blog posts: always use ghl_check_blog_slug before creating to ensure the slug is available
+- For social posts: use ghl_get_social_accounts first to get account IDs, then ghl_create_social_post
+- Always confirm completed actions clearly to the agent
 
 Agent name: ${agent.full_name}`;
 
