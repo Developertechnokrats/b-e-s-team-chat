@@ -98,7 +98,7 @@ export const handler = async (event) => {
       const token = event.headers.authorization?.replace("Bearer ", "");
 
       // Fire the background function — non-blocking
-      const bgUrl = process.env.URL + "/.netlify/functions/chat-background?jobId=" + jobId;
+      const bgUrl = process.env.APP_URL + "/.netlify/functions/chat-background?jobId=" + jobId;
       fetch(bgUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
