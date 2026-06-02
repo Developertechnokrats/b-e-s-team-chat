@@ -34,85 +34,100 @@ async function fetchPdfText(url) {
     const response = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; BESTeamBot/1.0)" }
     });
-    if (!response.ok) return { error: `Failed to fetch PDF: HTTP ${response.status}` };
+    if (!response.ok) {
+      return { error: "Failed to fetch PDF: HTTP " + response.status };
+    }
 
     const contentType = response.headers.get("content-type") || "";
-    const isLikelyPdf = contentType.includes("pdf") || url.toLowerCase().includes(".pdf");
-    if (!isLikelyPdf && !contentType.includes("octet-stream")) {
-      return { error: `URL does not appear to be a PDF (content-type: ${contentType})` };
+    const urlLower = url.toLowerCase();
+    const isPdf = contentType.includes("pdf") || urlLower.includes(".pdf") || contentType.includes("octet-stream");
+    if (!isPdf) {
+      return { error: "URL does not appear to be a PDF (content-type: " + contentType + ")" };
     }
 
     const arrayBuffer = await response.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
-
-    // Extract readable text from PDF binary — works for text-based PDFs
-    let text = "";
     const decoder = new TextDecoder("latin1");
     const raw = decoder.decode(bytes);
 
-    // Extract text between BT (begin text) and ET (end text) markers
-    const btEtRegex = /BT([\s\S]*?)ET/g;
-    let match;
-    while ((match = btEtRegex.exec(raw)) !== null) {
-      const block = match[1];
-      // Extract strings in parentheses: (Hello World)
-      const parenRegex = /\(([^)\]*(?:\.[^)\]*)*)\)/g;
-      let pm;
-      while ((pm = parenRegex.exec(block)) !== null) {
-        const str = pm[1]
-          .replace(/\n/g, "
-")
-          .replace(/\r/g, "
-")
-          .replace(/\t/g, "	")
-          .replace(/\\/g, "\")
-          .replace(/\([()`])/g, "$1")
-          .replace(/[^ -~
+    let text = "";
 
-	]/g, " ")
-          .trim();
-        if (str.length > 1) text += str + " ";
-      }
-      // Extract hex strings: <48656c6c6f>
-      const hexRegex = /<([0-9A-Fa-f]+)>/g;
-      let hm;
-      while ((hm = hexRegex.exec(block)) !== null) {
-        const hex = hm[1];
-        if (hex.length % 2 === 0) {
-          let hexText = "";
-          for (let i = 0; i < hex.length; i += 2) {
-            const code = parseInt(hex.substr(i, 2), 16);
-            if (code >= 32 && code <= 126) hexText += String.fromCharCode(code);
+    // Extract text blocks between BT...ET markers
+    let btIdx = 0;
+    while (true) {
+      const btPos = raw.indexOf("BT", btIdx);
+      if (btPos === -1) break;
+      const etPos = raw.indexOf("ET", btPos + 2);
+      if (etPos === -1) break;
+      const block = raw.slice(btPos + 2, etPos);
+      btIdx = etPos + 2;
+
+      // Extract parenthesis strings: (text here)
+      let i = 0;
+      while (i < block.length) {
+        if (block[i] === "(") {
+          let str = "";
+          i++;
+          while (i < block.length && block[i] !== ")") {
+            if (block[i] === "\\" && i + 1 < block.length) {
+              const next = block[i + 1];
+              if (next === "n") { str += "\n"; i += 2; }
+              else if (next === "r") { str += "\r"; i += 2; }
+              else if (next === "t") { str += "\t"; i += 2; }
+              else if (next === "(" || next === ")" || next === "\\") { str += next; i += 2; }
+              else { i++; }
+            } else {
+              const code = block.charCodeAt(i);
+              if (code >= 32 && code <= 126) str += block[i];
+              i++;
+            }
           }
-          if (hexText.trim().length > 1) text += hexText + " ";
+          str = str.trim();
+          if (str.length > 1) text += str + " ";
+          i++;
+        } else if (block[i] === "<") {
+          // Extract hex strings: <48656c6c6f>
+          const closeIdx = block.indexOf(">", i + 1);
+          if (closeIdx !== -1) {
+            const hex = block.slice(i + 1, closeIdx);
+            if (hex.length > 0 && hex.length % 2 === 0 && /^[0-9A-Fa-f]+$/.test(hex)) {
+              let hexStr = "";
+              for (let h = 0; h < hex.length; h += 2) {
+                const code = parseInt(hex.substr(h, 2), 16);
+                if (code >= 32 && code <= 126) hexStr += String.fromCharCode(code);
+              }
+              if (hexStr.trim().length > 1) text += hexStr + " ";
+            }
+            i = closeIdx + 1;
+          } else {
+            i++;
+          }
+        } else {
+          i++;
         }
       }
     }
 
-    // Clean up extracted text
-    text = text
-      .replace(/\s{3,}/g, "
-")
-      .replace(/([a-z])([A-Z])/g, "$1 $2")
-      .trim();
+    // Clean up whitespace
+    text = text.replace(/[ \t]{3,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
 
     if (text.length < 50) {
       return {
-        error: "Could not extract readable text from this PDF. It may be a scanned/image-based PDF. Please ensure the PDF contains selectable text.",
+        error: "Could not extract readable text from this PDF. It may be a scanned or image-based PDF that requires OCR. Please ensure the PDF contains selectable text.",
         rawLength: bytes.length
       };
     }
 
+    const truncated = text.length > 15000;
     return {
-      text: text.slice(0, 15000), // cap at 15k chars to stay within token limits
+      text: text.slice(0, 15000),
       charCount: text.length,
-      truncated: text.length > 15000
+      truncated: truncated
     };
   } catch (err) {
-    return { error: `PDF fetch error: ${err.message}` };
+    return { error: "PDF fetch error: " + err.message };
   }
 }
-
 
 // ── ALL GHL TOOLS ─────────────────────────────────────────────────
 const GHL_TOOLS = [
