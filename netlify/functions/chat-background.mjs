@@ -237,10 +237,48 @@ async function fetchPdfText(url, apiToken, locationId) {
     }
 
     text = text.replace(/[ \t]{3,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+
     if (text.length < 50) {
-      return { error: "Could not extract readable text. PDF may be image/scanned. Please use a text-based PDF." };
+      // Text extraction failed — PDF is likely scanned/image-based
+      // Fall back to Claude Vision: send raw PDF bytes directly to Claude API
+      try {
+        const base64Pdf = Buffer.from(bytes).toString("base64");
+        const visionResponse = await anthropic.messages.create({
+          model: "claude-sonnet-4-5",
+          max_tokens: 4096,
+          messages: [{
+            role: "user",
+            content: [
+              {
+                type: "document",
+                source: {
+                  type: "base64",
+                  media_type: "application/pdf",
+                  data: base64Pdf
+                }
+              },
+              {
+                type: "text",
+                text: "Please extract and return ALL text content from this PDF document. Include everything you can read — names, dates, addresses, employment history, qualifications, certifications, references, and any other information. Format it clearly with sections. This is for a CRM contact record summary."
+              }
+            ]
+          }]
+        });
+        const visionText = visionResponse.content.filter(b => b.type === "text").map(b => b.text).join("\n");
+        if (visionText && visionText.length > 50) {
+          return {
+            text: visionText,
+            charCount: visionText.length,
+            truncated: false,
+            source: "claude_vision"
+          };
+        }
+      } catch (visionErr) {
+        console.error("Claude Vision fallback error:", visionErr.message);
+      }
+      return { error: "Could not extract text from this PDF even with vision processing. The document may be corrupted or in an unsupported format." };
     }
-    return { text: text.slice(0, 15000), charCount: text.length, truncated: text.length > 15000 };
+    return { text: text.slice(0, 15000), charCount: text.length, truncated: text.length > 15000, source: "text_extraction" };
   } catch (err) {
     return { error: "PDF fetch error: " + err.message };
   }
@@ -468,7 +506,8 @@ PDF SUMMARY WORKFLOW:
   1. Tell the agent clearly: "I found a document viewer link but I need the direct download URL to read it. You can get this by opening the document in GHL, clicking the download button, and sharing that direct link with me."
   2. Offer to: create a task to review the document, or note the viewer URL on the contact record
   3. Do NOT keep retrying the same viewer URL
-- If text extraction worked but source is "html": summarise whatever text was found, noting it came from a web page not a PDF
+- If text extraction worked but source is "claude_vision": mention that the document was a scanned PDF and was read using visual AI recognition
+- If text extraction worked but source is "html": summarise whatever text was found, noting it came from a web page
 - Always confirm where the summary was saved after saving
 
 Agent name: ${agent.full_name}`;
