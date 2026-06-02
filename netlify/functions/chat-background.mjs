@@ -38,101 +38,134 @@ function detectDocumentType(url) {
   return "unknown";
 }
 
-// Try to extract the raw PDF URL from a GHL viewer page
-async function resolveViewerUrl(url, apiToken) {
+// Decode GHL viewer URL slug to document ID and fetch via API
+async function resolveGHLViewerUrl(url, apiToken, locationId) {
   try {
-    // Fetch the HTML viewer page
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
-      }
-    });
-    if (!response.ok) return null;
-    const html = await response.text();
+    // Extract slug from URL: /document-viewer/YTQyNXRvc2xnN3pi
+    const slugMatch = url.match(/\/document-viewer\/([A-Za-z0-9+/=_-]+)/);
+    if (!slugMatch) return null;
 
-    // Look for direct PDF URL in the page source
-    const pdfPatterns = [
-      /["']([^"']+\.pdf[^"']*)['"]/gi,
-      /src=["']([^"']+)['"]/gi,
-      /"url"\s*:\s*["']([^"']+)['"]/gi,
-      /pdfUrl['":\s]+["']([^"']+)['"]/gi,
-      /documentUrl['":\s]+["']([^"']+)['"]/gi,
-      /fileUrl['":\s]+["']([^"']+)['"]/gi,
-      /"file"\s*:\s*["']([^"']+)['"]/gi
-    ];
+    const slug = slugMatch[1];
 
-    for (const pattern of pdfPatterns) {
-      let match;
-      while ((match = pattern.exec(html)) !== null) {
-        const candidate = match[1];
-        if (candidate && (candidate.includes(".pdf") || candidate.includes("storage") || candidate.includes("document"))) {
-          // Make absolute if relative
-          if (candidate.startsWith("http")) return candidate;
-          try {
-            return new URL(candidate, url).href;
-          } catch (e) { continue; }
+    // Decode base64 to get document ID
+    let documentId;
+    try {
+      documentId = Buffer.from(slug, "base64").toString("utf8").trim();
+    } catch (e) {
+      documentId = slug; // use as-is if not base64
+    }
+
+    console.log("Decoded document ID:", documentId);
+
+    const BASE = "https://services.leadconnectorhq.com";
+    const headers = {
+      Authorization: "Bearer " + apiToken,
+      "Content-Type": "application/json",
+      Version: "2021-07-28"
+    };
+
+    // Try GHL Proposals API
+    const proposalRes = await fetch(`${BASE}/proposals/${documentId}?locationId=${locationId}`, { headers });
+    if (proposalRes.ok) {
+      const proposal = await proposalRes.json();
+      // Extract all text fields from the proposal
+      let text = "";
+      if (proposal.name) text += "Document: " + proposal.name + "\n\n";
+      if (proposal.status) text += "Status: " + proposal.status + "\n";
+      if (proposal.createdAt) text += "Created: " + proposal.createdAt + "\n\n";
+
+      // Walk through proposal sections/pages for content
+      const blocks = proposal.pages || proposal.sections || proposal.blocks || proposal.content || [];
+      function extractText(obj) {
+        if (!obj) return;
+        if (typeof obj === "string") { text += obj + "\n"; return; }
+        if (Array.isArray(obj)) { obj.forEach(extractText); return; }
+        if (typeof obj === "object") {
+          const textFields = ["text", "content", "value", "label", "description", "title", "html", "body"];
+          textFields.forEach(f => { if (obj[f] && typeof obj[f] === "string") text += obj[f] + "\n"; });
+          Object.values(obj).forEach(v => { if (typeof v === "object") extractText(v); });
         }
       }
+      extractText(blocks);
+      // Also check top-level fields
+      extractText(proposal.document);
+      extractText(proposal.data);
+
+      // Strip HTML tags from any HTML content
+      text = text.replace(/<[^>]+>/g, " ").replace(/\s{3,}/g, "\n").trim();
+
+      if (text.length > 100) {
+        return { docText: text, documentId, docName: proposal.name || "Document" };
+      }
     }
 
-    // Try to extract readable text directly from the HTML page
-    // Strip HTML tags and return whatever text content exists
-    const textContent = html
-      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-      .replace(/&nbsp;/g, " ").replace(/&#\d+;/g, " ")
-      .replace(/\s{3,}/g, "\n").trim();
-
-    if (textContent.length > 200) {
-      return { htmlText: textContent.slice(0, 15000) };
+    // Try Documents API (different endpoint)
+    const docRes = await fetch(`${BASE}/documents/${documentId}?locationId=${locationId}`, { headers });
+    if (docRes.ok) {
+      const doc = await docRes.json();
+      let text = "";
+      if (doc.name || doc.title) text += "Document: " + (doc.name || doc.title) + "\n\n";
+      if (doc.status) text += "Status: " + doc.status + "\n\n";
+      function extractText2(obj) {
+        if (!obj) return;
+        if (typeof obj === "string" && obj.length > 1) { text += obj + "\n"; return; }
+        if (Array.isArray(obj)) { obj.forEach(extractText2); return; }
+        if (typeof obj === "object") {
+          const textFields = ["text", "content", "value", "label", "description", "title", "html", "body", "name"];
+          textFields.forEach(f => { if (obj[f] && typeof obj[f] === "string") text += obj[f] + "\n"; });
+          Object.values(obj).forEach(v => { if (typeof v === "object") extractText2(v); });
+        }
+      }
+      extractText2(doc);
+      text = text.replace(/<[^>]+>/g, " ").replace(/\s{3,}/g, "\n").trim();
+      if (text.length > 100) {
+        return { docText: text, documentId, docName: doc.name || doc.title || "Document" };
+      }
     }
 
-    return null;
+    // Try to get a PDF download URL from the document
+    const pdfRes = await fetch(`${BASE}/proposals/${documentId}/pdf?locationId=${locationId}`, { headers });
+    if (pdfRes.ok) {
+      const pdfData = await pdfRes.json();
+      const pdfUrl = pdfData.url || pdfData.downloadUrl || pdfData.pdfUrl;
+      if (pdfUrl) return { pdfUrl };
+    }
+
+    return { documentId, notFound: true };
   } catch (err) {
+    console.error("resolveGHLViewerUrl error:", err.message);
     return null;
   }
 }
 
-async function fetchPdfText(url, apiToken) {
+async function fetchPdfText(url, apiToken, locationId) {
   try {
     const docType = detectDocumentType(url);
 
-    // Handle GHL viewer pages — try to resolve to raw PDF or extract HTML text
+    // Handle viewer-style URLs — the URL IS the PDF, just needs browser headers
     if (docType === "ghl_viewer" || docType === "ghl_proposal" || docType === "ghl_document") {
-      const resolved = await resolveViewerUrl(url, apiToken);
-      if (resolved && typeof resolved === "object" && resolved.htmlText) {
-        // Got text directly from HTML page
-        return {
-          text: resolved.htmlText,
-          charCount: resolved.htmlText.length,
-          truncated: false,
-          source: "html_viewer"
-        };
-      }
-      if (resolved && typeof resolved === "string") {
-        // Got a direct PDF URL — fall through to PDF extraction below
-        url = resolved;
-      } else {
-        return {
-          error: "VIEWER_PAGE",
-          viewerUrl: url,
-          message: "This is a document viewer page. The document content could not be automatically extracted."
-        };
-      }
+      // Fall through — fetch the URL directly with browser headers below
+      // No need to decode or call GHL API — it's an external PDF served from S3
     }
 
     const response = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (compatible; BESTeamBot/1.0)" }
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/pdf,application/octet-stream,*/*;q=0.9",
+        "Accept-Language": "en-US,en;q=0.5",
+        "Referer": new URL(url).origin + "/",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "same-origin"
+      }
     });
     if (!response.ok) return { error: "Failed to fetch PDF: HTTP " + response.status };
     const contentType = response.headers.get("content-type") || "";
     const urlLower = url.toLowerCase();
-    const isPdf = contentType.includes("pdf") || urlLower.includes(".pdf") || contentType.includes("octet-stream");
+    const isPdf = contentType.includes("pdf") || urlLower.includes(".pdf") ||
+                  contentType.includes("octet-stream") || docType === "ghl_viewer";
 
-    // If it's HTML, extract text from it directly
+    // If it's HTML, try extracting text from it
     if (contentType.includes("html") && !isPdf) {
       const html = await response.text();
       const textContent = html
@@ -295,18 +328,18 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
   try {
     switch (toolName) {
       case "read_pdf_from_url": {
-        const r = await fetchPdfText(input.url, apiToken);
+        const r = await fetchPdfText(input.url, apiToken, locationId);
         if (r.error === "VIEWER_PAGE") {
           return {
             success: false,
             isViewerPage: true,
             viewerUrl: r.viewerUrl,
-            message: r.message,
-            suggestion: "This is a GHL document viewer link. Try fetching the contact's proposals via ghl_get_proposals, or ask the agent to provide the direct PDF download link."
+            documentId: r.documentId || null,
+            message: r.message
           };
         }
         if (r.error) return r;
-        return { success: true, text: r.text, charCount: r.charCount, truncated: r.truncated || false, source: r.source || "pdf", contactId: input.contactId || null, contactName: input.contactName || null };
+        return { success: true, text: r.text, charCount: r.charCount, truncated: r.truncated || false, source: r.source || "pdf", docName: r.docName || null, contactId: input.contactId || null, contactName: input.contactName || null };
       }
       case "ghl_get_contacts": { const p = new URLSearchParams({ locationId, limit: String(input.limit||20) }); if (input.query) p.set("query", input.query); if (input.skip) p.set("skip", String(input.skip)); const r = await fetch(`${BASE}/contacts/?${p}`, { headers: h }); return await r.json(); }
       case "ghl_get_contact": { const r = await fetch(`${BASE}/contacts/${input.contactId}`, { headers: h }); return await r.json(); }
