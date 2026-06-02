@@ -27,8 +27,103 @@ async function getSessionContext(sessionId, agentId) {
 }
 
 // ── PDF text extractor ────────────────────────────────────────────
-async function fetchPdfText(url) {
+// Detect GHL document viewer URLs and try to get the raw document
+function detectDocumentType(url) {
+  const u = url.toLowerCase();
+  // GHL document viewer patterns
+  if (u.includes("/document-viewer/")) return "ghl_viewer";
+  if (u.includes("leadconnectorhq.com") && u.includes("/proposals/")) return "ghl_proposal";
+  if (u.includes("leadconnectorhq.com") && u.includes("/documents/")) return "ghl_document";
+  if (u.includes(".pdf")) return "pdf";
+  return "unknown";
+}
+
+// Try to extract the raw PDF URL from a GHL viewer page
+async function resolveViewerUrl(url, apiToken) {
   try {
+    // Fetch the HTML viewer page
+    const response = await fetch(url, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+      }
+    });
+    if (!response.ok) return null;
+    const html = await response.text();
+
+    // Look for direct PDF URL in the page source
+    const pdfPatterns = [
+      /["']([^"']+\.pdf[^"']*)['"]/gi,
+      /src=["']([^"']+)['"]/gi,
+      /"url"\s*:\s*["']([^"']+)['"]/gi,
+      /pdfUrl['":\s]+["']([^"']+)['"]/gi,
+      /documentUrl['":\s]+["']([^"']+)['"]/gi,
+      /fileUrl['":\s]+["']([^"']+)['"]/gi,
+      /"file"\s*:\s*["']([^"']+)['"]/gi
+    ];
+
+    for (const pattern of pdfPatterns) {
+      let match;
+      while ((match = pattern.exec(html)) !== null) {
+        const candidate = match[1];
+        if (candidate && (candidate.includes(".pdf") || candidate.includes("storage") || candidate.includes("document"))) {
+          // Make absolute if relative
+          if (candidate.startsWith("http")) return candidate;
+          try {
+            return new URL(candidate, url).href;
+          } catch (e) { continue; }
+        }
+      }
+    }
+
+    // Try to extract readable text directly from the HTML page
+    // Strip HTML tags and return whatever text content exists
+    const textContent = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+      .replace(/&nbsp;/g, " ").replace(/&#\d+;/g, " ")
+      .replace(/\s{3,}/g, "\n").trim();
+
+    if (textContent.length > 200) {
+      return { htmlText: textContent.slice(0, 15000) };
+    }
+
+    return null;
+  } catch (err) {
+    return null;
+  }
+}
+
+async function fetchPdfText(url, apiToken) {
+  try {
+    const docType = detectDocumentType(url);
+
+    // Handle GHL viewer pages — try to resolve to raw PDF or extract HTML text
+    if (docType === "ghl_viewer" || docType === "ghl_proposal" || docType === "ghl_document") {
+      const resolved = await resolveViewerUrl(url, apiToken);
+      if (resolved && typeof resolved === "object" && resolved.htmlText) {
+        // Got text directly from HTML page
+        return {
+          text: resolved.htmlText,
+          charCount: resolved.htmlText.length,
+          truncated: false,
+          source: "html_viewer"
+        };
+      }
+      if (resolved && typeof resolved === "string") {
+        // Got a direct PDF URL — fall through to PDF extraction below
+        url = resolved;
+      } else {
+        return {
+          error: "VIEWER_PAGE",
+          viewerUrl: url,
+          message: "This is a document viewer page. The document content could not be automatically extracted."
+        };
+      }
+    }
+
     const response = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; BESTeamBot/1.0)" }
     });
@@ -36,6 +131,22 @@ async function fetchPdfText(url) {
     const contentType = response.headers.get("content-type") || "";
     const urlLower = url.toLowerCase();
     const isPdf = contentType.includes("pdf") || urlLower.includes(".pdf") || contentType.includes("octet-stream");
+
+    // If it's HTML, extract text from it directly
+    if (contentType.includes("html") && !isPdf) {
+      const html = await response.text();
+      const textContent = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ").replace(/\s{3,}/g, "\n").trim();
+      if (textContent.length > 200) {
+        return { text: textContent.slice(0, 15000), charCount: textContent.length, truncated: false, source: "html" };
+      }
+      return { error: "URL is an HTML page with no extractable text content." };
+    }
+
     if (!isPdf) return { error: "URL does not appear to be a PDF (content-type: " + contentType + ")" };
 
     const arrayBuffer = await response.arrayBuffer();
@@ -184,9 +295,18 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
   try {
     switch (toolName) {
       case "read_pdf_from_url": {
-        const r = await fetchPdfText(input.url);
+        const r = await fetchPdfText(input.url, apiToken);
+        if (r.error === "VIEWER_PAGE") {
+          return {
+            success: false,
+            isViewerPage: true,
+            viewerUrl: r.viewerUrl,
+            message: r.message,
+            suggestion: "This is a GHL document viewer link. Try fetching the contact's proposals via ghl_get_proposals, or ask the agent to provide the direct PDF download link."
+          };
+        }
         if (r.error) return r;
-        return { success: true, text: r.text, charCount: r.charCount, truncated: r.truncated || false, contactId: input.contactId || null, contactName: input.contactName || null };
+        return { success: true, text: r.text, charCount: r.charCount, truncated: r.truncated || false, source: r.source || "pdf", contactId: input.contactId || null, contactName: input.contactName || null };
       }
       case "ghl_get_contacts": { const p = new URLSearchParams({ locationId, limit: String(input.limit||20) }); if (input.query) p.set("query", input.query); if (input.skip) p.set("skip", String(input.skip)); const r = await fetch(`${BASE}/contacts/?${p}`, { headers: h }); return await r.json(); }
       case "ghl_get_contact": { const r = await fetch(`${BASE}/contacts/${input.contactId}`, { headers: h }); return await r.json(); }
@@ -309,10 +429,14 @@ IMPORTANT RULES:
 YOU HAVE FULL ACCESS TO: contacts, conversations, opportunities, pipelines, calendars, appointments, workflows, campaigns, forms, surveys, users, payments, invoices, social media, blogs, email templates, trigger links, and PDF reading.
 
 PDF SUMMARY WORKFLOW:
-- When you find a PDF URL in a contact's custom fields, automatically call read_pdf_from_url
-- Generate a structured summary: Document Type, Key Information, Important Points, Action Items
-- Then ask: "Where would you like to save this? A) Internal Comment (team only) or B) Contact Note (notes tab)"
-- Wait for reply, then save accordingly using ghl_create_internal_comment or ghl_create_contact_note
+- When you find a URL in a contact's custom fields, call read_pdf_from_url with that URL
+- If it returns success with text: generate a structured summary (Document Type, Key Information, Important Points, Action Items) then ask "Where would you like to save this? A) Internal Comment or B) Contact Note"
+- If it returns isViewerPage: true — this means the URL is a GHL document viewer page. In that case:
+  1. Tell the agent clearly: "I found a document viewer link but I need the direct download URL to read it. You can get this by opening the document in GHL, clicking the download button, and sharing that direct link with me."
+  2. Offer to: create a task to review the document, or note the viewer URL on the contact record
+  3. Do NOT keep retrying the same viewer URL
+- If text extraction worked but source is "html": summarise whatever text was found, noting it came from a web page not a PDF
+- Always confirm where the summary was saved after saving
 
 Agent name: ${agent.full_name}`;
 
