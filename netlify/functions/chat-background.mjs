@@ -142,10 +142,66 @@ async function fetchPdfText(url, apiToken, locationId) {
   try {
     const docType = detectDocumentType(url);
 
-    // Handle viewer-style URLs — the URL IS the PDF, just needs browser headers
-    if (docType === "ghl_viewer" || docType === "ghl_proposal" || docType === "ghl_document") {
-      // Fall through — fetch the URL directly with browser headers below
-      // No need to decode or call GHL API — it's an external PDF served from S3
+    // For viewer-style URLs: the URL serves an HTML page that EMBEDS the PDF
+    // We need to fetch the HTML first, find the actual S3/CDN PDF URL, then fetch that
+    if (docType === "ghl_viewer") {
+      const htmlRes = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
+          "Referer": new URL(url).origin + "/"
+        }
+      });
+
+      if (!htmlRes.ok) return { error: "Failed to fetch viewer page: HTTP " + htmlRes.status };
+      const html = await htmlRes.text();
+
+      // Find the real PDF URL embedded in the HTML
+      // Common patterns: src="https://...s3...amazonaws.com/...pdf", pdfUrl, fileUrl, documentUrl
+      let realPdfUrl = null;
+      const patterns = [
+        /["'](https?:\/\/[^"']*\.pdf[^"']*)['"]/gi,
+        /["'](https?:\/\/[^"']*s3[^"']*amazonaws[^"']*)['"]/gi,
+        /["'](https?:\/\/[^"']*storage[^"']*\.pdf[^"']*)['"]/gi,
+        /pdfUrl["'\s:]+["'](https?:\/\/[^"']+)['"]/gi,
+        /fileUrl["'\s:]+["'](https?:\/\/[^"']+)['"]/gi,
+        /documentUrl["'\s:]+["'](https?:\/\/[^"']+)['"]/gi,
+        /src["'\s:]+["'](https?:\/\/[^"']*\.(pdf|PDF)[^"']*)['"]/gi,
+        /"url["'\s:]+["'](https?:\/\/[^"']+\.pdf[^"']*)['"]/gi
+      ];
+
+      for (const pattern of patterns) {
+        pattern.lastIndex = 0;
+        const match = pattern.exec(html);
+        if (match && match[1]) {
+          realPdfUrl = match[1];
+          break;
+        }
+      }
+
+      if (realPdfUrl) {
+        // Recurse with the real PDF URL
+        return fetchPdfText(realPdfUrl, apiToken, locationId);
+      }
+
+      // Could not find embedded PDF URL — send the whole HTML page to Claude Vision
+      // Claude can read text from the rendered HTML content
+      console.log("No embedded PDF URL found, trying Claude Vision on HTML content");
+      const strippedText = html
+        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+        .replace(/<[^>]+>/g, " ")
+        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+        .replace(/&nbsp;/g, " ").replace(/\s{3,}/g, "\n").trim();
+
+      if (strippedText.length > 300) {
+        return { text: strippedText.slice(0, 15000), charCount: strippedText.length, truncated: false, source: "html_viewer" };
+      }
+
+      return {
+        error: "VIEWER_NEEDS_AUTH",
+        message: "The document viewer page loaded but the PDF URL could not be found inside it. The PDF may be loaded dynamically by JavaScript after page load."
+      };
     }
 
     const response = await fetch(url, {
@@ -367,17 +423,26 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
     switch (toolName) {
       case "read_pdf_from_url": {
         const r = await fetchPdfText(input.url, apiToken, locationId);
-        if (r.error === "VIEWER_PAGE") {
+        if (r.error === "VIEWER_PAGE" || r.error === "VIEWER_NEEDS_AUTH") {
           return {
             success: false,
             isViewerPage: true,
-            viewerUrl: r.viewerUrl,
+            viewerUrl: input.url,
             documentId: r.documentId || null,
-            message: r.message
+            message: r.message || "Document viewer page — could not extract PDF URL automatically."
           };
         }
         if (r.error) return r;
-        return { success: true, text: r.text, charCount: r.charCount, truncated: r.truncated || false, source: r.source || "pdf", docName: r.docName || null, contactId: input.contactId || null, contactName: input.contactName || null };
+        return {
+          success: true,
+          text: r.text,
+          charCount: r.charCount,
+          truncated: r.truncated || false,
+          source: r.source || "pdf",
+          docName: r.docName || null,
+          contactId: input.contactId || null,
+          contactName: input.contactName || null
+        };
       }
       case "ghl_get_contacts": { const p = new URLSearchParams({ locationId, limit: String(input.limit||20) }); if (input.query) p.set("query", input.query); if (input.skip) p.set("skip", String(input.skip)); const r = await fetch(`${BASE}/contacts/?${p}`, { headers: h }); return await r.json(); }
       case "ghl_get_contact": { const r = await fetch(`${BASE}/contacts/${input.contactId}`, { headers: h }); return await r.json(); }
