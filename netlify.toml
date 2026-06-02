@@ -6,6 +6,9 @@
 [dev]
   port = 8888
 
+[functions]
+  node_bundler = "esbuild"
+
 # Auth
 [[redirects]]
   from = "/api/auth"
@@ -18,7 +21,7 @@
   to = "/.netlify/functions/admin"
   status = 200
 
-# Chat API (all routes)
+# Chat routes — all go through the trigger function
 [[redirects]]
   from = "/api/chat/sessions"
   to = "/.netlify/functions/chat"
@@ -35,6 +38,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/chat/poll"
+  to = "/.netlify/functions/chat"
+  status = 200
+
+[[redirects]]
   from = "/api/chat"
   to = "/.netlify/functions/chat"
   status = 200
@@ -44,6 +52,3 @@
   from = "/*"
   to = "/index.html"
   status = 200
-
-[functions]
-  node_bundler = "esbuild"
