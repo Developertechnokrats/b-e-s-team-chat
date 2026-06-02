@@ -276,26 +276,77 @@ async function sendMessage() {
 
   isTyping = true; $('sendBtn').disabled = true;
   $('input').value = ''; $('input').style.height = 'auto';
-  $('emptyState') && ($('emptyState').style.display = 'none');
+  const es = $('emptyState'); if (es) es.style.display = 'none';
 
   appendMessage('user', text);
   showTyping();
 
   try {
-    const res = await fetch('/api/chat', {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ message: text, sessionId: currentSessionId, history })
+    // Step 1 — trigger: responds instantly with a jobId
+    const triggerRes = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ message: text, sessionId: currentSessionId, history: history.slice(-10) })
     });
-    const data = await res.json();
+
+    if (!triggerRes.ok) {
+      const errData = await triggerRes.json().catch(() => ({}));
+      removeTyping();
+      appendMessage('assistant', errData.error || 'Server error. Please try again.');
+      isTyping = false; $('sendBtn').disabled = false; $('input').focus();
+      return;
+    }
+
+    const { jobId } = await triggerRes.json();
+    if (!jobId) {
+      removeTyping();
+      appendMessage('assistant', 'Could not start the request. Please try again.');
+      isTyping = false; $('sendBtn').disabled = false; $('input').focus();
+      return;
+    }
+
+    // Step 2 — poll until done (every 2 seconds, max 5 minutes)
+    let reply = null;
+    let elapsed = 0;
+    const POLL_INTERVAL = 2000;
+    const MAX_WAIT = 300000; // 5 minutes
+
+    while (elapsed < MAX_WAIT) {
+      await new Promise(r => setTimeout(r, POLL_INTERVAL));
+      elapsed += POLL_INTERVAL;
+
+      try {
+        const pollRes = await fetch(`/api/chat/poll?jobId=${jobId}`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const pollData = await pollRes.json();
+
+        if (pollData.status === 'done' || pollData.status === 'error') {
+          reply = pollData.reply || 'Something went wrong. Please try again.';
+          break;
+        }
+        // status === 'pending' — keep polling
+      } catch (pollErr) {
+        // Network blip — keep trying
+      }
+    }
+
     removeTyping();
-    const reply = data.reply || data.error || 'Something went wrong.';
+
+    if (!reply) {
+      reply = 'The request is taking longer than expected. Please check back or try again.';
+    }
+
     appendMessage('assistant', reply);
     history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
-    if (history.length > 40) history = history.slice(-40);
-    loadSessions(); // refresh titles
+    if (history.length > 20) history = history.slice(-20);
+    loadSessions();
+
   } catch(e) {
-    removeTyping(); appendMessage('assistant', 'Connection error. Please retry.');
+    removeTyping();
+    appendMessage('assistant', 'Connection error: ' + e.message + '. Please check your connection and retry.');
   }
+
   isTyping = false; $('sendBtn').disabled = false; $('input').focus();
 }
 
