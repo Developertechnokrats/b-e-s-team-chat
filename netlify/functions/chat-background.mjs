@@ -27,318 +27,125 @@ async function getSessionContext(sessionId, agentId) {
 }
 
 // ── PDF text extractor ────────────────────────────────────────────
-// Detect GHL document viewer URLs and try to get the raw document
-function detectDocumentType(url) {
-  const u = url.toLowerCase();
-  // GHL document viewer patterns
-  if (u.includes("/document-viewer/")) return "ghl_viewer";
-  if (u.includes("leadconnectorhq.com") && u.includes("/proposals/")) return "ghl_proposal";
-  if (u.includes("leadconnectorhq.com") && u.includes("/documents/")) return "ghl_document";
-  if (u.includes(".pdf")) return "pdf";
-  return "unknown";
-}
+// ── Download any URL and read it with Claude Vision ───────────────
+// This handles PDFs, images, viewer pages — everything in one shot
+async function downloadAndReadDocument(url) {
+  const browserHeaders = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/pdf,application/octet-stream,image/*,text/html,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+    "Cache-Control": "no-cache"
+  };
 
-// Decode GHL viewer URL slug to document ID and fetch via API
-async function resolveGHLViewerUrl(url, apiToken, locationId) {
-  try {
-    // Extract slug from URL: /document-viewer/YTQyNXRvc2xnN3pi
-    const slugMatch = url.match(/\/document-viewer\/([A-Za-z0-9+/=_-]+)/);
-    if (!slugMatch) return null;
+  // Step 1: Try fetching the URL directly
+  let response = await fetch(url, { headers: browserHeaders });
 
-    const slug = slugMatch[1];
+  // Step 2: If we got HTML back, it's a viewer page — try to find the real doc URL inside it
+  if (response.ok) {
+    const ct = response.headers.get("content-type") || "";
+    if (ct.includes("html")) {
+      const html = await response.text();
 
-    // Decode base64 to get document ID
-    let documentId;
-    try {
-      documentId = Buffer.from(slug, "base64").toString("utf8").trim();
-    } catch (e) {
-      documentId = slug; // use as-is if not base64
-    }
-
-    console.log("Decoded document ID:", documentId);
-
-    const BASE = "https://services.leadconnectorhq.com";
-    const headers = {
-      Authorization: "Bearer " + apiToken,
-      "Content-Type": "application/json",
-      Version: "2021-07-28"
-    };
-
-    // Try GHL Proposals API
-    const proposalRes = await fetch(`${BASE}/proposals/${documentId}?locationId=${locationId}`, { headers });
-    if (proposalRes.ok) {
-      const proposal = await proposalRes.json();
-      // Extract all text fields from the proposal
-      let text = "";
-      if (proposal.name) text += "Document: " + proposal.name + "\n\n";
-      if (proposal.status) text += "Status: " + proposal.status + "\n";
-      if (proposal.createdAt) text += "Created: " + proposal.createdAt + "\n\n";
-
-      // Walk through proposal sections/pages for content
-      const blocks = proposal.pages || proposal.sections || proposal.blocks || proposal.content || [];
-      function extractText(obj) {
-        if (!obj) return;
-        if (typeof obj === "string") { text += obj + "\n"; return; }
-        if (Array.isArray(obj)) { obj.forEach(extractText); return; }
-        if (typeof obj === "object") {
-          const textFields = ["text", "content", "value", "label", "description", "title", "html", "body"];
-          textFields.forEach(f => { if (obj[f] && typeof obj[f] === "string") text += obj[f] + "\n"; });
-          Object.values(obj).forEach(v => { if (typeof v === "object") extractText(v); });
-        }
-      }
-      extractText(blocks);
-      // Also check top-level fields
-      extractText(proposal.document);
-      extractText(proposal.data);
-
-      // Strip HTML tags from any HTML content
-      text = text.replace(/<[^>]+>/g, " ").replace(/\s{3,}/g, "\n").trim();
-
-      if (text.length > 100) {
-        return { docText: text, documentId, docName: proposal.name || "Document" };
-      }
-    }
-
-    // Try Documents API (different endpoint)
-    const docRes = await fetch(`${BASE}/documents/${documentId}?locationId=${locationId}`, { headers });
-    if (docRes.ok) {
-      const doc = await docRes.json();
-      let text = "";
-      if (doc.name || doc.title) text += "Document: " + (doc.name || doc.title) + "\n\n";
-      if (doc.status) text += "Status: " + doc.status + "\n\n";
-      function extractText2(obj) {
-        if (!obj) return;
-        if (typeof obj === "string" && obj.length > 1) { text += obj + "\n"; return; }
-        if (Array.isArray(obj)) { obj.forEach(extractText2); return; }
-        if (typeof obj === "object") {
-          const textFields = ["text", "content", "value", "label", "description", "title", "html", "body", "name"];
-          textFields.forEach(f => { if (obj[f] && typeof obj[f] === "string") text += obj[f] + "\n"; });
-          Object.values(obj).forEach(v => { if (typeof v === "object") extractText2(v); });
-        }
-      }
-      extractText2(doc);
-      text = text.replace(/<[^>]+>/g, " ").replace(/\s{3,}/g, "\n").trim();
-      if (text.length > 100) {
-        return { docText: text, documentId, docName: doc.name || doc.title || "Document" };
-      }
-    }
-
-    // Try to get a PDF download URL from the document
-    const pdfRes = await fetch(`${BASE}/proposals/${documentId}/pdf?locationId=${locationId}`, { headers });
-    if (pdfRes.ok) {
-      const pdfData = await pdfRes.json();
-      const pdfUrl = pdfData.url || pdfData.downloadUrl || pdfData.pdfUrl;
-      if (pdfUrl) return { pdfUrl };
-    }
-
-    return { documentId, notFound: true };
-  } catch (err) {
-    console.error("resolveGHLViewerUrl error:", err.message);
-    return null;
-  }
-}
-
-async function fetchPdfText(url, apiToken, locationId) {
-  try {
-    const docType = detectDocumentType(url);
-
-    // For viewer-style URLs: the URL serves an HTML page that EMBEDS the PDF
-    // We need to fetch the HTML first, find the actual S3/CDN PDF URL, then fetch that
-    if (docType === "ghl_viewer") {
-      const htmlRes = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "text/html,application/xhtml+xml,*/*;q=0.9",
-          "Referer": new URL(url).origin + "/"
-        }
-      });
-
-      if (!htmlRes.ok) return { error: "Failed to fetch viewer page: HTTP " + htmlRes.status };
-      const html = await htmlRes.text();
-
-      // Find the real PDF URL embedded in the HTML
-      // Common patterns: src="https://...s3...amazonaws.com/...pdf", pdfUrl, fileUrl, documentUrl
-      let realPdfUrl = null;
-      const patterns = [
-        /["'](https?:\/\/[^"']*\.pdf[^"']*)['"]/gi,
-        /["'](https?:\/\/[^"']*s3[^"']*amazonaws[^"']*)['"]/gi,
-        /["'](https?:\/\/[^"']*storage[^"']*\.pdf[^"']*)['"]/gi,
-        /pdfUrl["'\s:]+["'](https?:\/\/[^"']+)['"]/gi,
-        /fileUrl["'\s:]+["'](https?:\/\/[^"']+)['"]/gi,
-        /documentUrl["'\s:]+["'](https?:\/\/[^"']+)['"]/gi,
-        /src["'\s:]+["'](https?:\/\/[^"']*\.(pdf|PDF)[^"']*)['"]/gi,
-        /"url["'\s:]+["'](https?:\/\/[^"']+\.pdf[^"']*)['"]/gi
+      // Look for PDF/document URLs embedded in the page source
+      const urlPatterns = [
+        /["'](https?:\/\/[^"'\s]+\.pdf[^"'\s]*)['"]/gi,
+        /["'](https?:\/\/[^"'\s]*s3[^"'\s]*amazonaws\.com[^"'\s]*)['"]/gi,
+        /["'](https?:\/\/[^"'\s]*\.r2\.cloudflarestorage[^"'\s]*)['"]/gi,
+        /["'](https?:\/\/[^"'\s]*supabase[^"'\s]*storage[^"'\s]*)['"]/gi,
+        /["'](https?:\/\/[^"'\s]*storage[^"'\s]*\.googleapis[^"'\s]*)['"]/gi,
+        /pdfUrl\s*[:=]\s*["'`](https?:\/\/[^"'`\s]+)['"'`]/gi,
+        /fileUrl\s*[:=]\s*["'`](https?:\/\/[^"'`\s]+)['"'`]/gi,
+        /src\s*:\s*["'](https?:\/\/[^"']+\.(pdf|PDF))['"]/gi,
       ];
 
-      for (const pattern of patterns) {
+      let realUrl = null;
+      for (const pattern of urlPatterns) {
         pattern.lastIndex = 0;
-        const match = pattern.exec(html);
-        if (match && match[1]) {
-          realPdfUrl = match[1];
+        const m = pattern.exec(html);
+        if (m && m[1] && !m[1].includes("fonts.googleapis") && !m[1].includes(".js") && !m[1].includes(".css")) {
+          realUrl = m[1];
           break;
         }
       }
 
-      if (realPdfUrl) {
-        // Recurse with the real PDF URL
-        return fetchPdfText(realPdfUrl, apiToken, locationId);
-      }
+      if (realUrl) {
+        // Fetch the real document URL
+        response = await fetch(realUrl, { headers: browserHeaders });
+      } else {
+        // No embedded URL found — extract plain text from HTML directly
+        const text = html
+          .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
+          .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
+          .replace(/<[^>]+>/g, " ")
+          .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
+          .replace(/&nbsp;/g, " ").replace(/\s{3,}/g, "\n").trim();
 
-      // Could not find embedded PDF URL — send the whole HTML page to Claude Vision
-      // Claude can read text from the rendered HTML content
-      console.log("No embedded PDF URL found, trying Claude Vision on HTML content");
-      const strippedText = html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-        .replace(/&nbsp;/g, " ").replace(/\s{3,}/g, "\n").trim();
-
-      if (strippedText.length > 300) {
-        return { text: strippedText.slice(0, 15000), charCount: strippedText.length, truncated: false, source: "html_viewer" };
-      }
-
-      return {
-        error: "VIEWER_NEEDS_AUTH",
-        message: "The document viewer page loaded but the PDF URL could not be found inside it. The PDF may be loaded dynamically by JavaScript after page load."
-      };
-    }
-
-    const response = await fetch(url, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/pdf,application/octet-stream,*/*;q=0.9",
-        "Accept-Language": "en-US,en;q=0.5",
-        "Referer": new URL(url).origin + "/",
-        "Sec-Fetch-Dest": "document",
-        "Sec-Fetch-Mode": "navigate",
-        "Sec-Fetch-Site": "same-origin"
-      }
-    });
-    if (!response.ok) return { error: "Failed to fetch PDF: HTTP " + response.status };
-    const contentType = response.headers.get("content-type") || "";
-    const urlLower = url.toLowerCase();
-    const isPdf = contentType.includes("pdf") || urlLower.includes(".pdf") ||
-                  contentType.includes("octet-stream") || docType === "ghl_viewer";
-
-    // If it's HTML, try extracting text from it
-    if (contentType.includes("html") && !isPdf) {
-      const html = await response.text();
-      const textContent = html
-        .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, " ")
-        .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, " ")
-        .replace(/<[^>]+>/g, " ")
-        .replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">")
-        .replace(/&nbsp;/g, " ").replace(/\s{3,}/g, "\n").trim();
-      if (textContent.length > 200) {
-        return { text: textContent.slice(0, 15000), charCount: textContent.length, truncated: false, source: "html" };
-      }
-      return { error: "URL is an HTML page with no extractable text content." };
-    }
-
-    if (!isPdf) return { error: "URL does not appear to be a PDF (content-type: " + contentType + ")" };
-
-    const arrayBuffer = await response.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-    const decoder = new TextDecoder("latin1");
-    const raw = decoder.decode(bytes);
-    let text = "";
-
-    let btIdx = 0;
-    while (true) {
-      const btPos = raw.indexOf("BT", btIdx);
-      if (btPos === -1) break;
-      const etPos = raw.indexOf("ET", btPos + 2);
-      if (etPos === -1) break;
-      const block = raw.slice(btPos + 2, etPos);
-      btIdx = etPos + 2;
-      let i = 0;
-      while (i < block.length) {
-        if (block[i] === "(") {
-          let str = "";
-          i++;
-          while (i < block.length && block[i] !== ")") {
-            if (block[i] === "\\" && i + 1 < block.length) {
-              const next = block[i + 1];
-              if (next === "n") { str += "\n"; i += 2; }
-              else if (next === "r") { str += "\r"; i += 2; }
-              else if (next === "t") { str += "\t"; i += 2; }
-              else if (next === "(" || next === ")" || next === "\\") { str += next; i += 2; }
-              else { i++; }
-            } else {
-              const code = block.charCodeAt(i);
-              if (code >= 32 && code <= 126) str += block[i];
-              i++;
-            }
-          }
-          str = str.trim();
-          if (str.length > 1) text += str + " ";
-          i++;
-        } else if (block[i] === "<") {
-          const closeIdx = block.indexOf(">", i + 1);
-          if (closeIdx !== -1) {
-            const hex = block.slice(i + 1, closeIdx);
-            if (hex.length > 0 && hex.length % 2 === 0 && /^[0-9A-Fa-f]+$/.test(hex)) {
-              let hexStr = "";
-              for (let h = 0; h < hex.length; h += 2) {
-                const code = parseInt(hex.substr(h, 2), 16);
-                if (code >= 32 && code <= 126) hexStr += String.fromCharCode(code);
-              }
-              if (hexStr.trim().length > 1) text += hexStr + " ";
-            }
-            i = closeIdx + 1;
-          } else { i++; }
-        } else { i++; }
-      }
-    }
-
-    text = text.replace(/[ \t]{3,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
-
-    if (text.length < 50) {
-      // Text extraction failed — PDF is likely scanned/image-based
-      // Fall back to Claude Vision: send raw PDF bytes directly to Claude API
-      try {
-        const base64Pdf = Buffer.from(bytes).toString("base64");
-        const visionResponse = await anthropic.messages.create({
-          model: "claude-sonnet-4-5",
-          max_tokens: 4096,
-          messages: [{
-            role: "user",
-            content: [
-              {
-                type: "document",
-                source: {
-                  type: "base64",
-                  media_type: "application/pdf",
-                  data: base64Pdf
-                }
-              },
-              {
-                type: "text",
-                text: "Please extract and return ALL text content from this PDF document. Include everything you can read — names, dates, addresses, employment history, qualifications, certifications, references, and any other information. Format it clearly with sections. This is for a CRM contact record summary."
-              }
-            ]
-          }]
-        });
-        const visionText = visionResponse.content.filter(b => b.type === "text").map(b => b.text).join("\n");
-        if (visionText && visionText.length > 50) {
-          return {
-            text: visionText,
-            charCount: visionText.length,
-            truncated: false,
-            source: "claude_vision"
-          };
+        if (text.length > 200) {
+          return { success: true, text, source: "html_text" };
         }
-      } catch (visionErr) {
-        console.error("Claude Vision fallback error:", visionErr.message);
+        return { error: "Document viewer page found but could not locate the embedded document URL. The document may be loaded dynamically by JavaScript after page render." };
       }
-      return { error: "Could not extract text from this PDF even with vision processing. The document may be corrupted or in an unsupported format." };
     }
-    return { text: text.slice(0, 15000), charCount: text.length, truncated: text.length > 15000, source: "text_extraction" };
-  } catch (err) {
-    return { error: "PDF fetch error: " + err.message };
   }
+
+  if (!response.ok) {
+    return { error: "Failed to download document: HTTP " + response.status + " from " + url };
+  }
+
+  // Step 3: We have binary content — send directly to Claude Vision
+  const arrayBuffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  const base64 = Buffer.from(bytes).toString("base64");
+  const contentType = response.headers.get("content-type") || "application/pdf";
+
+  // Determine media type for Claude API
+  let mediaType = "application/pdf";
+  if (contentType.includes("image/png")) mediaType = "image/png";
+  else if (contentType.includes("image/jpeg") || contentType.includes("image/jpg")) mediaType = "image/jpeg";
+  else if (contentType.includes("image/webp")) mediaType = "image/webp";
+  else if (contentType.includes("image/gif")) mediaType = "image/gif";
+
+  const isImage = mediaType.startsWith("image/");
+
+  // Step 4: Send to Claude Vision for full text extraction
+  const visionResponse = await anthropic.messages.create({
+    model: "claude-sonnet-4-5",
+    max_tokens: 4096,
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: isImage ? "image" : "document",
+          source: { type: "base64", media_type: mediaType, data: base64 }
+        },
+        {
+          type: "text",
+          text: "Extract ALL text content from this document. Include every piece of information — names, dates, addresses, phone numbers, email addresses, employment history, education, certifications, skills, references, and any other details. Format clearly with sections. Return only the extracted content, no commentary."
+        }
+      ]
+    }]
+  });
+
+  const extractedText = visionResponse.content
+    .filter(b => b.type === "text")
+    .map(b => b.text)
+    .join("\n")
+    .trim();
+
+  if (!extractedText || extractedText.length < 20) {
+    return { error: "Could not extract readable content from this document." };
+  }
+
+  return {
+    success: true,
+    text: extractedText,
+    charCount: extractedText.length,
+    source: "claude_vision",
+    mediaType
+  };
 }
+
+
 
 // ── All GHL Tools (same as chat.mjs) ─────────────────────────────
 const GHL_TOOLS = [
@@ -422,24 +229,14 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
   try {
     switch (toolName) {
       case "read_pdf_from_url": {
-        const r = await fetchPdfText(input.url, apiToken, locationId);
-        if (r.error === "VIEWER_PAGE" || r.error === "VIEWER_NEEDS_AUTH") {
-          return {
-            success: false,
-            isViewerPage: true,
-            viewerUrl: input.url,
-            documentId: r.documentId || null,
-            message: r.message || "Document viewer page — could not extract PDF URL automatically."
-          };
-        }
-        if (r.error) return r;
+        // Download the document and read it with Claude Vision — handles all formats
+        const r = await downloadAndReadDocument(input.url);
+        if (r.error) return { success: false, error: r.error };
         return {
           success: true,
           text: r.text,
-          charCount: r.charCount,
-          truncated: r.truncated || false,
-          source: r.source || "pdf",
-          docName: r.docName || null,
+          charCount: r.charCount || r.text.length,
+          source: r.source,
           contactId: input.contactId || null,
           contactName: input.contactName || null
         };
@@ -535,7 +332,7 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
 export const handler = async (event) => {
   let jobId, sessionId, agentId;
   try {
-    const { message, sessionId: sid, history = [], token } = JSON.parse(event.body || "{}");
+    const { message, sessionId: sid, history = [], token, file } = JSON.parse(event.body || "{}");
     sessionId = sid;
 
     const agent = await verifyAgent(token);
@@ -547,10 +344,8 @@ export const handler = async (event) => {
 
     const { location_id, api_token, name: subAccountName } = session.sub_accounts;
 
-    // Get the jobId that was pre-created by the chat-trigger function
     jobId = event.queryStringParameters?.jobId;
 
-    // Save user message
     await supabase.from("messages").insert({ session_id: sessionId, role: "user", content: message });
 
     const SYSTEM = `You are the B-E-S-Team AI Assistant — a smart, professional CRM assistant built exclusively for B-E-S-Team.
@@ -564,20 +359,35 @@ IMPORTANT RULES:
 
 YOU HAVE FULL ACCESS TO: contacts, conversations, opportunities, pipelines, calendars, appointments, workflows, campaigns, forms, surveys, users, payments, invoices, social media, blogs, email templates, trigger links, and PDF reading.
 
-PDF SUMMARY WORKFLOW:
-- When you find a URL in a contact's custom fields, call read_pdf_from_url with that URL
-- If it returns success with text: generate a structured summary (Document Type, Key Information, Important Points, Action Items) then ask "Where would you like to save this? A) Internal Comment or B) Contact Note"
-- If it returns isViewerPage: true — this means the URL is a GHL document viewer page. In that case:
-  1. Tell the agent clearly: "I found a document viewer link but I need the direct download URL to read it. You can get this by opening the document in GHL, clicking the download button, and sharing that direct link with me."
-  2. Offer to: create a task to review the document, or note the viewer URL on the contact record
-  3. Do NOT keep retrying the same viewer URL
-- If text extraction worked but source is "claude_vision": mention that the document was a scanned PDF and was read using visual AI recognition
-- If text extraction worked but source is "html": summarise whatever text was found, noting it came from a web page
-- Always confirm where the summary was saved after saving
+PDF / DOCUMENT SUMMARY WORKFLOW:
+- When an agent uploads a file directly, read it and generate a structured summary: Document Type, Key Information, Important Points, Action Items
+- When you find a PDF URL in a contact's custom fields, call read_pdf_from_url to try to fetch it
+- After generating the summary ALWAYS ask: "Where would you like to save this? A) Internal Comment (team only, activity feed) or B) Contact Note (notes tab)"
+- Wait for reply then save using ghl_create_internal_comment or ghl_create_contact_note
+- Confirm where it was saved after saving
 
 Agent name: ${agent.full_name}`;
 
-    let loopMessages = [...history.slice(-10), { role: "user", content: message }];
+    // Build first message — include uploaded file if present
+    let firstUserContent;
+    if (file && file.base64) {
+      const mediaType = file.type || "application/pdf";
+      const isImage = mediaType.startsWith("image/");
+      firstUserContent = [
+        {
+          type: isImage ? "image" : "document",
+          source: { type: "base64", media_type: mediaType, data: file.base64 }
+        },
+        { type: "text", text: message }
+      ];
+    } else {
+      firstUserContent = message;
+    }
+
+    let loopMessages = [
+      ...history.slice(-10),
+      { role: "user", content: firstUserContent }
+    ];
     let finalText = "";
 
     for (let i = 0; i < 8; i++) {
@@ -608,11 +418,9 @@ Agent name: ${agent.full_name}`;
       loopMessages = [...loopMessages, { role: "assistant", content: response.content }, { role: "user", content: toolResults }];
     }
 
-    // Save result to Supabase so the poller can pick it up
     await supabase.from("messages").insert({ session_id: sessionId, role: "assistant", content: finalText });
     await supabase.from("job_results").upsert({ id: jobId, status: "done", reply: finalText, session_id: sessionId });
 
-    // Auto-title session on first message
     if (history.length === 0) {
       const title = message.slice(0, 50) + (message.length > 50 ? "\u2026" : "");
       await supabase.from("sessions").update({ title }).eq("id", sessionId);
