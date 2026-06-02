@@ -28,6 +28,92 @@ async function getSessionContext(sessionId, agentId) {
   return session;
 }
 
+// ── PDF text extractor ────────────────────────────────────────────
+async function fetchPdfText(url) {
+  try {
+    const response = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; BESTeamBot/1.0)" }
+    });
+    if (!response.ok) return { error: `Failed to fetch PDF: HTTP ${response.status}` };
+
+    const contentType = response.headers.get("content-type") || "";
+    const isLikelyPdf = contentType.includes("pdf") || url.toLowerCase().includes(".pdf");
+    if (!isLikelyPdf && !contentType.includes("octet-stream")) {
+      return { error: `URL does not appear to be a PDF (content-type: ${contentType})` };
+    }
+
+    const arrayBuffer = await response.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // Extract readable text from PDF binary — works for text-based PDFs
+    let text = "";
+    const decoder = new TextDecoder("latin1");
+    const raw = decoder.decode(bytes);
+
+    // Extract text between BT (begin text) and ET (end text) markers
+    const btEtRegex = /BT([\s\S]*?)ET/g;
+    let match;
+    while ((match = btEtRegex.exec(raw)) !== null) {
+      const block = match[1];
+      // Extract strings in parentheses: (Hello World)
+      const parenRegex = /\(([^)\]*(?:\.[^)\]*)*)\)/g;
+      let pm;
+      while ((pm = parenRegex.exec(block)) !== null) {
+        const str = pm[1]
+          .replace(/\n/g, "
+")
+          .replace(/\r/g, "
+")
+          .replace(/\t/g, "	")
+          .replace(/\\/g, "\")
+          .replace(/\([()`])/g, "$1")
+          .replace(/[^ -~
+
+	]/g, " ")
+          .trim();
+        if (str.length > 1) text += str + " ";
+      }
+      // Extract hex strings: <48656c6c6f>
+      const hexRegex = /<([0-9A-Fa-f]+)>/g;
+      let hm;
+      while ((hm = hexRegex.exec(block)) !== null) {
+        const hex = hm[1];
+        if (hex.length % 2 === 0) {
+          let hexText = "";
+          for (let i = 0; i < hex.length; i += 2) {
+            const code = parseInt(hex.substr(i, 2), 16);
+            if (code >= 32 && code <= 126) hexText += String.fromCharCode(code);
+          }
+          if (hexText.trim().length > 1) text += hexText + " ";
+        }
+      }
+    }
+
+    // Clean up extracted text
+    text = text
+      .replace(/\s{3,}/g, "
+")
+      .replace(/([a-z])([A-Z])/g, "$1 $2")
+      .trim();
+
+    if (text.length < 50) {
+      return {
+        error: "Could not extract readable text from this PDF. It may be a scanned/image-based PDF. Please ensure the PDF contains selectable text.",
+        rawLength: bytes.length
+      };
+    }
+
+    return {
+      text: text.slice(0, 15000), // cap at 15k chars to stay within token limits
+      charCount: text.length,
+      truncated: text.length > 15000
+    };
+  } catch (err) {
+    return { error: `PDF fetch error: ${err.message}` };
+  }
+}
+
+
 // ── ALL GHL TOOLS ─────────────────────────────────────────────────
 const GHL_TOOLS = [
 
@@ -669,7 +755,28 @@ const GHL_TOOLS = [
     }}
   },
 
-  // ════════════ EMAIL TEMPLATES ════════════
+  // PDF READER
+  {
+    name: "read_pdf_from_url",
+    description: "Fetch and extract full text content from a PDF at a given URL. Use this whenever a contact has a PDF link in their custom fields or any URL ending in .pdf is found. After reading, always generate a structured summary then ask the agent: Save as Internal Comment or Contact Note?",
+    input_schema: { type: "object", properties: {
+      url: { type: "string", description: "Direct URL to the PDF file" },
+      contactId: { type: "string", description: "The contact ID this PDF belongs to" },
+      contactName: { type: "string", description: "The contact name for labelling the summary" }
+    }, required: ["url"] }
+  },
+
+  // INTERNAL COMMENT
+  {
+    name: "ghl_create_internal_comment",
+    description: "Add an internal comment to a contact conversation activity feed. Internal comments are ONLY visible to team members, the contact never sees them. Use when agent chooses Internal Comment as save destination for a PDF summary.",
+    input_schema: { type: "object", properties: {
+      contactId: { type: "string", description: "Contact ID to add the comment to" },
+      message: { type: "string", description: "The internal comment content" }
+    }, required: ["contactId", "message"] }
+  },
+
+  // EMAIL TEMPLATES
   {
     name: "ghl_get_email_templates",
     description: "Get all email templates saved in the account. Useful for referencing templates before sending campaigns.",
@@ -1139,6 +1246,60 @@ async function executeGHLTool(toolName, input, locationId, apiToken) {
         return await r.json();
       }
 
+      // ── PDF READER ──
+      case "read_pdf_from_url": {
+        const pdfResult = await fetchPdfText(input.url);
+        if (pdfResult.error) return pdfResult;
+        return {
+          success: true,
+          text: pdfResult.text,
+          charCount: pdfResult.charCount,
+          truncated: pdfResult.truncated || false,
+          contactId: input.contactId || null,
+          contactName: input.contactName || null,
+          sourceUrl: input.url
+        };
+      }
+
+      // ── INTERNAL COMMENT ──
+      case "ghl_create_internal_comment": {
+        // GHL internal comments go via the conversations messages endpoint
+        // First get or create the conversation for this contact
+        const convSearch = await fetch(
+          `${BASE}/conversations/search?locationId=${locationId}&contactId=${input.contactId}`,
+          { headers: h2 }
+        );
+        const convData = await convSearch.json();
+        let conversationId = convData.conversations?.[0]?.id;
+
+        // Create conversation if none exists
+        if (!conversationId) {
+          const newConv = await fetch(`${BASE}/conversations/`, {
+            method: "POST", headers: h2,
+            body: JSON.stringify({ contactId: input.contactId, locationId })
+          });
+          const newConvData = await newConv.json();
+          conversationId = newConvData.conversation?.id || newConvData.id;
+        }
+
+        if (!conversationId) {
+          return { error: "Could not find or create conversation for this contact" };
+        }
+
+        // Post as TYPE_ACTIVITY (internal note visible only to team)
+        const r = await fetch(`${BASE}/conversations/messages`, {
+          method: "POST", headers: h2,
+          body: JSON.stringify({
+            type: "TYPE_ACTIVITY_CONTACT",
+            locationId,
+            conversationId,
+            contactId: input.contactId,
+            message: input.message
+          })
+        });
+        return await r.json();
+      }
+
       default:
         return { error: `Unknown tool: ${toolName}` };
     }
@@ -1229,6 +1390,26 @@ TOOL USAGE GUIDELINES:
 - For blog posts: always use ghl_check_blog_slug before creating to ensure the slug is available
 - For social posts: use ghl_get_social_accounts first to get account IDs, then ghl_create_social_post
 - Always confirm completed actions clearly to the agent
+
+PDF SUMMARY WORKFLOW — follow this EXACTLY whenever a PDF is involved:
+STEP 1: When reading a contact and you find any custom field containing a URL that ends in .pdf or looks like a document link, automatically call read_pdf_from_url with that URL.
+STEP 2: After successfully reading the PDF, generate a structured summary with these sections:
+  - **Document Type** (what kind of document is it?)
+  - **Key Information** (main facts, figures, names, dates)
+  - **Important Points** (bullet list of critical details)
+  - **Action Items** (anything that requires follow-up)
+STEP 3: Present the summary clearly to the agent, then ALWAYS ask exactly this:
+  "Where would you like me to save this summary?
+  **A) Internal Comment** — visible to team only, saved to the contact activity feed
+  **B) Contact Note** — saved to the contact's notes tab"
+STEP 4: Wait for the agent's reply (A or B, or "internal"/"note", or similar).
+STEP 5a: If agent chooses Internal Comment → call ghl_create_internal_comment with the full summary
+STEP 5b: If agent chooses Contact Note → call ghl_create_contact_note with the full summary
+STEP 6: Confirm where it was saved with a brief message.
+
+INTERNAL COMMENT vs CONTACT NOTE:
+- Internal Comment: goes into the contact's conversation/activity feed. Only team members see it. Good for operational notes, analysis, private observations.
+- Contact Note: goes into the Notes tab on the contact record. Good for reference information, background context, summaries.
 
 Agent name: ${agent.full_name}`;
 
